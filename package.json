@@ -1,0 +1,19 @@
+{
+	"type": "module",
+	"name": "steam-native-notify",
+	"version": "0.1.0",
+	"description": "Mirror Steam notification toasts to the desktop notification daemon.",
+	"main": "./frontend/index.tsx",
+	"license": "MIT",
+	"scripts": {
+		"dev": "millennium-ttc --build dev",
+		"build": "millennium-ttc --build prod"
+	},
+	"dependencies": {
+		"@steambrew/client": "^5.5.14",
+		"@steambrew/ttc": "^2.7.5"
+	},
+	"devDependencies": {
+		"typescript": "^5.7.2"
+	}
+}

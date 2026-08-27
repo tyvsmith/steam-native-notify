@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Talk to Millennium's external protocol from the shell.
+
+MEP is a unix socket any local process can speak: 4-byte little-endian length
+prefix, msgpack body, one response per request. It is how the click bridge
+reaches into the running plugin, and it is useful on its own for poking at a
+live Steam without a devtools session.
+
+Usage:
+  mep <method> [key=value ...]        params are strings unless they parse as JSON
+  mep --methods                       the ones this tool knows are useful
+
+Examples:
+  mep millennium.version
+  mep plugin.config.set name=steam-native-notify key=selftest value=go
+  mep plugin.config.get_all name=steam-native-notify
+"""
+
+import json
+import socket
+import struct
+import sys
+
+import msgpack
+
+SOCKET = "/tmp/millennium-mep.sock"
+
+USEFUL_METHODS = [
+    "millennium.version", "millennium.status",
+    "plugin.list", "plugin.get", "plugin.status",
+    "plugin.enable", "plugin.disable", "plugin.restart",
+    "plugin.config.get", "plugin.config.set",
+    "plugin.config.delete", "plugin.config.get_all",
+]
+
+
+def call(method, params=None, timeout=5.0):
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    try:
+        sock.connect(SOCKET)
+    except FileNotFoundError:
+        raise SystemExit(f"{SOCKET} is not there — is Steam running with Millennium?")
+    except ConnectionRefusedError:
+        raise SystemExit(f"{SOCKET} refused the connection — Millennium may be starting up.")
+
+    try:
+        request = {"id": "mep-cli", "method": method}
+        if params:
+            request["params"] = params
+        body = msgpack.packb(request, use_bin_type=True)
+        sock.sendall(struct.pack("<I", len(body)) + body)
+
+        header = sock.recv(4)
+        if len(header) < 4:
+            raise SystemExit("short response header — the connection dropped")
+        (length,) = struct.unpack("<I", header)
+
+        buf = b""
+        while len(buf) < length:
+            chunk = sock.recv(length - len(buf))
+            if not chunk:
+                raise SystemExit("connection closed mid-frame")
+            buf += chunk
+        return msgpack.unpackb(buf, raw=False)
+    finally:
+        sock.close()
+
+
+def parse_param(token):
+    """key=value. The value is JSON when it parses as JSON, else a plain string."""
+    if "=" not in token:
+        raise SystemExit(f"parameters look like key=value, got: {token}")
+    key, _, raw = token.partition("=")
+    try:
+        return key, json.loads(raw)
+    except json.JSONDecodeError:
+        return key, raw
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0
+
+    if argv[0] == "--methods":
+        print("\n".join(f"  {m}" for m in USEFUL_METHODS))
+        return 0
+
+    method = argv[0]
+    params = dict(parse_param(t) for t in argv[1:])
+
+    reply = call(method, params or None)
+    print(json.dumps(reply, indent=2))
+    return 1 if reply.get("error") else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
