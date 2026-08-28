@@ -15,12 +15,10 @@
  * routes.ts and published a wrong count; deriving makes that impossible.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadFrontendModules } from './load-frontend.mjs';
 import { parseProto } from './proto.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -30,33 +28,7 @@ const { types, messages } = parseProto(
 
 // --- the real routing rules, compiled out of the frontend ------------------
 
-/**
- * Node cannot import the frontend's extensionless TS imports directly, so the
- * routing subgraph (routes.ts and the urlstore/identity modules it reads) is
- * compiled to CommonJS in a temp dir and required from there. The subgraph is
- * deliberately free of Millennium imports; if that changes, this fails loudly.
- */
-function loadRoutingModules() {
-	const tmp = mkdtempSync(join(tmpdir(), 'snn-routes-'));
-	try {
-		execFileSync(
-			join(root, 'node_modules', '.bin', 'tsc'),
-			[join(root, 'frontend', 'routes.ts'), '--module', 'commonjs', '--target', 'es2022', '--skipLibCheck', '--outDir', tmp],
-			{ stdio: 'inherit' },
-		);
-		writeFileSync(join(tmp, 'package.json'), '{"type":"commonjs"}\n');
-		const req = createRequire(import.meta.url);
-		return {
-			routes: req(join(tmp, 'routes.js')),
-			urlstore: req(join(tmp, 'urlstore.js')),
-			identity: req(join(tmp, 'identity.js')),
-		};
-	} finally {
-		rmSync(tmp, { recursive: true, force: true });
-	}
-}
-
-const { routes, urlstore, identity } = loadRoutingModules();
+const { routes, urlstore, identity } = loadFrontendModules(['routes', 'urlstore', 'identity']);
 
 // The templates a live client served, recorded in docs/steam-routing.md
 // ("The URL store"), and a well-formed placeholder identity: enough for every
