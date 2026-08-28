@@ -46,11 +46,14 @@ else
 fi
 
 hr
-echo "== 2. did the notification feed attach? =="
-verdict=$(plugin_lines | grep -aE "Notifications keys=|ClientNotifications keys=|can replay =|notification feed|no notification feed|hook installed" | tail -6)
+echo "== 2. did the hook attach, and did startup data load? =="
+# These prefixes are the contract stated in frontend/log.ts; keep in sync.
+verdict=$(plugin_lines | grep -aE "hook installed|hook failed|g_PopupManager never appeared|url templates:|identity:" | tail -6)
 if [[ -n $verdict ]]; then printf '%s\n' "$verdict"; else echo "   (nothing yet)"; fi
 
 hr
 echo "== 3. what did the last notifications carry? =="
-notifs=$(plugin_lines | grep -aE "notif index=|toast .* -> " | tail -"$LINES")
+# A `dev-fire:` line with no `from-toast` line after it means Steam's own
+# per-type gating swallowed the test fire, not a break (docs/HANDOFF.md).
+notifs=$(plugin_lines | grep -aE "from-toast |toast .* -> |dev-fire" | tail -"$LINES")
 if [[ -n $notifs ]]; then printf '%s\n' "$notifs"; else echo "   (no notifications captured yet — trigger one)"; fi
