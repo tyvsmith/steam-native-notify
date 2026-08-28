@@ -92,6 +92,23 @@ plugin substitutes it that way.
 | `steam://openurl/<https url>` | protocol entry `["openurl", ...]` → `SteamWeb` | literally the code `SteamWeb` itself emits for non-steam URLs |
 | `steam://url/<Name>/<params>` | protocol entry `["url", ...]` → `ResolveURL` + `SteamWeb` | the components' `bG(name, ...params)` helper is `SteamWeb(ResolveURL(name, ...params))` (module 18057 `m`/`b`) |
 
+## Focus
+
+Only the chat family raises a window: `friends/message` / `friends/joinchat`
+hardcode `btakefocus: !0` into the `ShowFriendChatDialog` command
+(→ `k_EWindowBringToFrontAndForceOS` in FriendsUI). Every other desktop
+handler — `nav`, `openurl`, `url`, `settings`, the whole protocol table and
+its dispatcher — contains no `BringToFront`; the one raise-on-navigate in the
+codebase is the *gamepad* navigator's `beforeNavigate`, guarded by "no window
+focused". Steam's desktop code never needed focus because its toasts are only
+clickable while Steam is already focused.
+
+`steam://open/main` is not handled by the current client (tested: no effect).
+The window-manager-agnostic raise is the launcher-activation path: an argless
+`steam` invocation while the client runs makes it show and focus its main
+window itself (tested: focus moved to Steam). `tools/notify-action` sequences
+that before non-chat routes, on click only.
+
 ## Catalog: client-sourced types (`eSource=1`)
 
 "component" names are the module 11374 functions in the beautified dump.

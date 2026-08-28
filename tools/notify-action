@@ -9,6 +9,7 @@
 #
 # Usage: notify-action <title> <body> [image] [steam-url]
 #        notify-action --resolve-icon <url>     print the resolved icon path
+#        notify-action --click-plan <steam-url> print what a click would run
 
 set -u
 
@@ -84,10 +85,34 @@ resolve_icon() {
 	fi
 }
 
+# A click must both surface the client and navigate it. Steam's own nav,
+# openurl and settings handlers never raise a window -- Steam's toasts are only
+# clickable while Steam is focused, so its code never needed to -- and an
+# argless `steam` is the launcher-activation path: the running client shows and
+# focuses its main window itself, on any window manager. Sequenced so
+# activation lands before the route, and so a client that has to boot first
+# boots, then navigates.
+#
+# Chat routes are the exception: the client's friends/message handler passes
+# btakefocus=1 and force-focuses the chat window itself. Raising the main
+# window at the same time could bury the dialog the click just opened.
+click_plan() {
+	case ${1:-} in
+	"") echo none ;;
+	steam://friends/message/*) echo route ;;
+	*) echo activate+route ;;
+	esac
+}
+
 # Resolution is the fiddliest part and the easiest to get wrong silently, so it
 # is exposed for testing: notify-action --resolve-icon <url>
 if [ "${1:-}" = "--resolve-icon" ]; then
 	resolve_icon "${2:-}"
+	exit 0
+fi
+
+if [ "${1:-}" = "--click-plan" ]; then
+	click_plan "${2:-}"
 	exit 0
 fi
 
@@ -103,10 +128,15 @@ chosen=$(notify-send -a "$APP_NAME" -i "$icon" -t "$EXPIRE" \
 # does this. Dismissing is the whole behaviour.
 [ -n "$route" ] || exit 0
 
-# Only the route. Raising the Steam window afterwards was tried and removed: it
-# is unknown whether Steam's own toast raises the client when its action fires,
-# and a route that opens a window (a chat that is not already open) gets focus
-# from the window manager anyway. Do not add it back without observing what a
-# real actionable Steam toast does first.
-steam "$route" >/dev/null 2>&1 &
+case $(click_plan "$route") in
+route)
+	steam "$route" >/dev/null 2>&1 &
+	;;
+activate+route)
+	{
+		steam
+		steam "$route"
+	} >/dev/null 2>&1 &
+	;;
+esac
 exit 0

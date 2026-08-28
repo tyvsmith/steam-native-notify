@@ -201,12 +201,25 @@ Still open:
    centre copy is inert). Orthogonal to routing, but it bounds how a click can
    ever be tested or used here.
 
-## Open question deferred
+## Focus, resolved without window-manager code
 
-`steam://nav/...` reuses the existing Steam window, so nothing opens and nothing
-raises. A focus call was implemented, then removed, and the case for it is now
-stronger: Steam's own toast can only be clicked while Steam has focus, so
-"clicked while looking at Steam" is the baseline. Chat routes are the exception:
-the client's `friends/message` handler passes `btakefocus=1` itself. A
-best-effort focus in `tools/notify-action` would be the only window-manager
-dependency in the project.
+`steam://nav/...` and `steam://openurl/...` change pages inside the existing
+window and never raise it; only the chat routes self-focus (`friends/message`
+passes `btakefocus=1`). Steam never needed raise-on-navigate on the desktop:
+its toasts are only clickable while Steam is already focused. The desktop
+`steam://` surface contains no raising URL at all (the dispatcher and every
+table entry were read; the one `BringToFront` on navigation is gamepad-only).
+
+The fix is Steam's own launcher-activation path: an argless `steam` invocation
+while the client runs makes it show and focus its main window itself — verified
+live, focus moved to Steam on any-WM mechanics. `tools/notify-action` now runs,
+on click only, `steam; steam "$route"` for non-chat routes (sequenced, so a
+tray-only client surfaces first and a stopped one boots then navigates), and
+just the route for chat routes, whose dialog would otherwise risk being buried
+by the main window. `notify-action --click-plan <route>` prints the decision;
+`tools/test-backend` asserts it. Unclicked notifications never touch the
+`steam` binary at all.
+
+Still unwatched: the tray-only case end to end (window created + focused +
+navigated by one click). The raise of an existing background window is the
+part verified by observation.

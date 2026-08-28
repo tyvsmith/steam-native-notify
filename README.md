@@ -83,10 +83,13 @@ a Media item, a modal), the click here does nothing rather than something
 nearby. `docs/steam-routing.md` records the analysis, per type, with
 provenance.
 
-**No window-manager code.** Raising the Steam window on click was implemented and
-removed. It is unknown whether Steam's own toast raises the client when its
-action fires, and a route that opens a window gets focus from the window manager
-anyway. The project now depends on nothing beyond `notify-send`, `curl` and
+**No window-manager code.** A click both surfaces the client and navigates it,
+without touching the compositor: an argless `steam` is the launcher-activation
+path, on which the running client shows and focuses its main window itself.
+Steam's own nav and web handlers never raise a window -- its toasts are only
+clickable while Steam is focused, so its code never needed to -- and chat
+routes skip the activation because the client force-focuses the chat dialog on
+its own. The project depends on nothing beyond `notify-send`, `curl` and
 `steam`.
 
 **Protobuf types are generated, not written.** `vendor/` holds Steam's published
