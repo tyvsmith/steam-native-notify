@@ -1,4 +1,5 @@
 import { resolveUrl } from './urlstore';
+import { myProfilePath } from './identity';
 
 /**
  * The steam:// route a notification's click should follow, or null when Steam's
@@ -9,13 +10,13 @@ import { resolveUrl } from './urlstore';
  * (why `steam://friends/message` IS `ShowFriendChatDialog`, why
  * `steam://openurl/` IS Steam's own `SteamWeb`) live in docs/steam-routing.md.
  * Do not add a rule without a row there.
+ *
+ * Identity and URL templates are module state (identity.ts, urlstore.ts),
+ * loaded once at startup; a rule that needs either and finds it missing
+ * returns null rather than a broken URL.
  */
 
 export type PbValue = number | bigint | string;
-
-/** eSource on Steam's notification object: which of the two systems produced it. */
-export const SOURCE_CLIENT = 1;
-export const SOURCE_SERVER = 2;
 
 /**
  * Steam's `SteamWeb(url)` navigation is `location.href = url` for steam:// URLs
@@ -36,12 +37,13 @@ function openInClient(url: string | null | undefined): string | null {
  * Steam's JS ResolveURL only substitutes %pN%, so the alias resolves later in
  * the logged-in client; from outside, `profiles/<steamid64>` is the same
  * prefix -- verified: that form 302s to the canonical achievements page.
- * Without an id the route is dropped rather than emitted broken.
+ * Without an identity the route is dropped rather than emitted broken.
  */
-function fillMyStuff(url: string | null, my: string | null): string | null {
+function fillMyStuff(url: string | null): string | null {
 	if (!url) return null;
 	if (!url.includes('%mystuff%')) return url;
-	return my ? url.replace('%mystuff%', `profiles/${my}`) : null;
+	const my = myProfilePath();
+	return my ? url.replace('%mystuff%', my) : null;
 }
 
 function chatWith(person: PbValue | undefined): string | null {
@@ -55,8 +57,20 @@ function appDetails(appid: PbValue | undefined): string | null {
 	return null;
 }
 
-/** Client-sourced notifications (eSource=1), fields decoded via the schema. */
-export function clientRoute(type: number, fields: Record<string, PbValue>, me64: string | null): string | null {
+/**
+ * The signed-in user's pending-invites page. Two clicks land here by Steam's
+ * own routing -- the client FriendInviteRollup toast and the server FriendInvite
+ * toast (docs/steam-routing.md, both catalog rows) -- so the shared destination
+ * is deliberate, not copy-paste.
+ */
+function pendingInvitesUrl(): string | null {
+	const community = resolveUrl('CommunityFrontPage');
+	const my = myProfilePath();
+	return community && my ? `${community}${my}/friends/pending` : null;
+}
+
+/** Client-sourced notifications, fields decoded via the schema. */
+export function clientRoute(type: number, fields: Record<string, PbValue>): string | null {
 	switch (type) {
 		// nav.App(appid): DownloadCompleted (observed: switches the library to
 		// that game), CloudSyncFailure, CloudSyncConflict.
@@ -81,8 +95,7 @@ export function clientRoute(type: number, fields: Record<string, PbValue>, me64:
 		case 5: {
 			const appid = fields.appid;
 			if (typeof appid !== 'number' || appid <= 0) return null;
-			const my = me64 && /^\d{17}$/.test(me64) ? me64 : null;
-			return openInClient(fillMyStuff(resolveUrl('SteamIDAchievementsPage', appid), my));
+			return openInClient(fillMyStuff(resolveUrl('SteamIDAchievementsPage', appid)));
 		}
 
 		// Settings dialog: SystemUpdate opens System; HardwareUpdateAvailable
@@ -101,11 +114,8 @@ export function clientRoute(type: number, fields: Record<string, PbValue>, me64:
 		// FriendInviteRollup: Steam opens the invites dialog, which has no URL;
 		// the pending-invites page is where Steam's server-sourced FriendInvite
 		// click lands on desktop, and shows the same invites.
-		case 10: {
-			const community = resolveUrl('CommunityFrontPage');
-			const my = me64 && /^\d{17}$/.test(me64) ? me64 : null;
-			return community && my ? openInClient(`${community}profiles/${my}/friends/pending`) : null;
-		}
+		case 10:
+			return openInClient(pendingInvitesUrl());
 
 		// Everything else is a dismiss-only toast, an explicit no-op, or a
 		// modal this plugin cannot reproduce. The full inventory is the
@@ -128,27 +138,31 @@ export interface ServerNotification {
 /**
  * Server-sourced notifications. Steam's own mapping is type → URL from
  * body_data (module 655 registries and the pr component map); these rules are
- * that mapping, with base URLs resolved from Steam's URL table and `me64` the
- * current user's steamid64 (read from loginusers.vdf by the backend).
+ * that mapping, with base URLs resolved from Steam's URL table and the user's
+ * own pages addressed via identity.ts.
+ *
+ * Steam's registries mix addressing styles: gamenotifications and tradehistory
+ * hang off `/my/`, trade offers off `/profiles/<id64>/`. Mirrored as-is; the
+ * inconsistency is Valve's, do not "fix" it.
  */
-export function serverRoute(n: ServerNotification, me64: string | null): string | null {
+export function serverRoute(n: ServerNotification): string | null {
 	const community = resolveUrl('CommunityFrontPage');
 	const store = resolveUrl('StoreFrontPage');
 	const body = n.body ?? {};
-	const my = me64 && /^\d{17}$/.test(me64) ? me64 : null;
+	const my = myProfilePath();
 
 	switch (n.type) {
 		case 2: // Gift: ResolveURL("PendingGift")
-			return openInClient(fillMyStuff(resolveUrl('PendingGift'), my));
+			return openInClient(fillMyStuff(resolveUrl('PendingGift')));
 
 		case 3: // Comment: community + rollup url
 			return typeof n.url === 'string' && n.url && community ? openInClient(community + n.url) : null;
 
 		case 4: // Item announcement: my inventory
-			return community && my ? openInClient(`${community}profiles/${my}/inventory`) : null;
+			return community && my ? openInClient(`${community}${my}/inventory`) : null;
 
 		case 5: // Friend invite: my pending invites page
-			return community && my ? openInClient(`${community}profiles/${my}/friends/pending`) : null;
+			return openInClient(pendingInvitesUrl());
 
 		case 6: // Major sale: the link Steam put in the body
 		case 10: // General: likewise
@@ -163,14 +177,14 @@ export function serverRoute(n: ServerNotification, me64: string | null): string 
 			const appids = Array.isArray(body.appids) ? body.appids : null;
 			const count = typeof body.count === 'number' ? body.count : 0;
 			if (count > 1 && appids?.length) {
-				return openInClient(`${store}wishlist/profiles/${my}/?wng=${appids.toString()}#sort=discount`);
+				return openInClient(`${store}wishlist/${my}/?wng=${appids.toString()}#sort=discount`);
 			}
 			const appid = typeof body.appid === 'number' ? `?appid=${body.appid}` : '';
-			return openInClient(`${store}wishlist/profiles/${my}/${appid}#sort=discount`);
+			return openInClient(`${store}wishlist/${my}/${appid}#sort=discount`);
 		}
 
 		case 9: // Trade offer: my trade offers page
-			return community && my ? openInClient(`${community}profiles/${my}/tradeoffers`) : null;
+			return community && my ? openInClient(`${community}${my}/tradeoffers`) : null;
 
 		case 11: {
 			// Help request reply: the ticket's help wizard page

@@ -1,13 +1,10 @@
 import { callable, definePlugin, findModuleExport, IconsModule } from '@steambrew/client';
-import { fieldsForType, typeName } from './generated/notifications';
-import {
-	clientRoute,
-	serverRoute,
-	SOURCE_SERVER,
-	type PbValue,
-	type ServerNotification,
-} from './routes';
+import { typeName } from './generated/notifications';
+import { clientRoute, serverRoute } from './routes';
+import { notificationFromToast, type DecodedNotification } from './notification';
+import { setIdentity } from './identity';
 import { loadUrlTemplates } from './urlstore';
+import { dlog, safeJson } from './log';
 import { SettingsPanel } from './Settings';
 import { loadSettings, parseCallableJson, settings } from './settings';
 
@@ -17,12 +14,10 @@ import { loadSettings, parseCallableJson, settings } from './settings';
  * see; the text a person reads only exists in that popup's DOM. So the bridge
  * has to live in here, where the document is reachable.
  *
- * The toast supplies everything: what a person reads -- title, body, artwork --
- * from its DOM, and the typed notification behind it from its React tree, where
- * Steam attaches its own decoded object. The notification feed
- * (`SteamClient.Notifications.RegisterForNotifications`) was used for the typed
- * half and deleted: it misses types entirely (an incoming voice chat produces no
- * feed event at all), while the React path sees every source.
+ * This file owns the popup lifecycle: hook the popup manager, wait for a toast
+ * to paint, deliver it once, close it if asked. What the toast means lives
+ * elsewhere -- notification.ts decodes Steam's attached object, routes.ts turns
+ * it into a steam:// route.
  *
  * `g_PopupManager` is not public API. It is what the shipping
  * kitsune-notifications plugin uses to find the same windows, which is the only
@@ -51,7 +46,6 @@ const TOAST_PREFIX = 'notificationtoasts_';
  * single JSON string has no ordering to get wrong.
  */
 const notify = callable<[{ payload: string }], string>('Notify');
-const logLine = callable<[{ line: string }], string>('Log');
 const identity = callable<[], string>('Identity');
 const takeDevCommand = callable<[], string>('TakeDevCommand');
 
@@ -70,125 +64,14 @@ const MANAGER_RETRY_LIMIT = 60; // ~30s, covers a cold Steam start
 const delivered = new Set<string>();
 const registrations: Registration[] = [];
 
-let debug = true;
-
-function dlog(line: string): void {
-	if (!debug) return;
-	try {
-		void logLine({ line });
-	} catch {
-		/* Diagnostics must never take the notification path down with them. */
-	}
-}
-
-/**
- * JSON.stringify throws outright on a BigInt, and Steam's decoded values can be
- * any protobuf scalar. A debug line that throws killed every notification once
- * already, so serialising for logs is done defensively.
- */
-function safeJson(value: unknown): string {
-	try {
-		return JSON.stringify(value, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)) ?? 'undefined';
-	} catch (e) {
-		return `<unserialisable: ${(e as Error)?.message ?? e}>`;
-	}
-}
-
-interface ToastNotification {
-	type: number;
-	/** eSource: 1 = classic client notification, 2 = the server (web) system. */
-	source: number;
-	/** Client-sourced: fields decoded from the Closure array via the schema. */
-	fields: Record<string, PbValue>;
-	/** Server-sourced: the rollup's type, parsed body_data and url. */
-	server: ServerNotification | null;
-}
-
-/**
- * The notification Steam attached to the toast, read out of the React tree.
- *
- * Preferred over the feed because it sees more: an incoming voice chat renders
- * as `notificationtoasts_10000_desktop` and produces no feed event at all, so
- * anything relying on the feed cannot route it. The toast is rendered from
- * whatever produced the notification, so reading it here covers every source.
- *
- * The shape of `data` depends on `eSource` (docs/steam-routing.md):
- * client-sourced, it is Steam's own decoded protobuf message, a Closure wrapper
- * whose values sit in `array` at `fieldNumber + arrayIndexOffset_`; field names
- * come from the generated schema. Server-sourced, it is a plain rollup object
- * `{ type, item, ... }` whose `item.body_data` is a JSON string.
- */
-function notificationFromToast(win: Window): ToastNotification | null {
-	try {
-		const doc = win.document;
-		if (!doc) return null;
-
-		let node: Element | null = null;
-		let key: string | undefined;
-		for (const el of Array.from(doc.querySelectorAll('*'))) {
-			key = Object.keys(el).find((k) => k.startsWith('__reactFiber'));
-			if (key) {
-				node = el;
-				break;
-			}
-		}
-		if (!node || !key) return null;
-
-		let fiber: any = (node as any)[key];
-		for (let depth = 0; fiber && depth < 12; depth++) {
-			const notification = (fiber.memoizedProps ?? fiber.pendingProps)?.notification;
-			if (notification && typeof notification === 'object') {
-				const type = Number((notification as any).eType);
-				const source = Number((notification as any).eSource);
-				const data = (notification as any).data;
-				const fields: Record<string, PbValue> = {};
-				let server: ServerNotification | null = null;
-
-				if (source === SOURCE_SERVER) {
-					let body: Record<string, unknown> | null = null;
-					try {
-						const raw = data?.item?.body_data;
-						if (typeof raw === 'string' && raw) body = JSON.parse(raw);
-					} catch {
-						/* an unparseable body routes as null, and the raw dump below shows why */
-					}
-					server = {
-						type: Number(data?.type),
-						body,
-						url: typeof data?.url === 'string' ? data.url : undefined,
-					};
-				} else {
-					const schema = fieldsForType(type);
-					const array = data?.array;
-					const offset = typeof data?.arrayIndexOffset_ === 'number' ? data.arrayIndexOffset_ : -1;
-					if (schema && Array.isArray(array)) {
-						for (const [num, field] of Object.entries(schema)) {
-							const value = array[Number(num) + offset];
-							if (value !== undefined && value !== null) fields[field.name] = value as PbValue;
-						}
-					}
-				}
-				return { type, source, fields, server };
-			}
-			fiber = fiber.return;
-		}
-	} catch {
-		/* a toast that cannot be read still gets delivered, just without a route */
-	}
-	return null;
-}
-
-/**
- * The current user's steamid64, from the backend (loginusers.vdf). Server-side
- * notification routes to "my" community pages need it; missing, those routes
- * come back null rather than broken.
- */
-let me64: string | null = null;
-
 /** Route the way Steam would; the rules and their citations live in routes.ts. */
-function routeFor(n: ToastNotification): string | null {
-	if (n.source === SOURCE_SERVER && n.server) return serverRoute(n.server, me64);
-	return clientRoute(n.type, n.fields, me64);
+function routeFor(n: DecodedNotification): string | null {
+	switch (n.source) {
+		case 'client':
+			return clientRoute(n.type, n.fields);
+		case 'server':
+			return serverRoute(n.server);
+	}
 }
 
 // --------------------------------------------------------------------------
@@ -233,6 +116,11 @@ function toastImage(win: Window): string | null {
 	}
 }
 
+/**
+ * Wait for the toast to paint, then hand it to deliverToast. Polls at
+ * READ_INTERVAL_MS for up to READ_ATTEMPTS (~1.2s); a toast that closes first
+ * or never paints is logged and dropped, never delivered empty.
+ */
 function readWhenPainted(win: Window, name: string, attempt: number = 0): void {
 	if (win.closed) {
 		dlog(`toast ${name} closed before it painted`);
@@ -250,6 +138,16 @@ function readWhenPainted(win: Window, name: string, attempt: number = 0): void {
 		return;
 	}
 
+	deliverToast(win, name, text);
+}
+
+/**
+ * Deliver one painted toast: at most once per popup name, never throwing, and
+ * only after a successful read -- Steam's own popup is closed at the end, and
+ * a toast this function could not read stays on screen rather than being
+ * silently swallowed.
+ */
+function deliverToast(win: Window, name: string, text: string): void {
 	if (delivered.has(name)) return;
 	delivered.add(name);
 
@@ -264,8 +162,8 @@ function readWhenPainted(win: Window, name: string, attempt: number = 0): void {
 			kind = typeName(fromToast.type);
 			route = routeFor(fromToast);
 			const detail =
-				fromToast.source === SOURCE_SERVER
-					? `server type=${fromToast.server?.type} url=${fromToast.server?.url ?? ''} body=${safeJson(fromToast.server?.body)}`
+				fromToast.source === 'server'
+					? `server type=${fromToast.server.type} url=${fromToast.server.url ?? ''} body=${safeJson(fromToast.server.body)}`
 					: `fields=${safeJson(fromToast.fields)}`;
 			dlog(`from-toast ${name} type=${fromToast.type} (${kind}) source=${fromToast.source} ${detail}`.slice(0, 700));
 		}
@@ -280,8 +178,6 @@ function readWhenPainted(win: Window, name: string, attempt: number = 0): void {
 	// twice. Done here rather than with a compositor rule because the plugin
 	// knows the read succeeded, and because it works on any window manager.
 	if (settings().hideSteamToast) {
-		// After the read, never before: a toast that could not be read is worth
-		// leaving on screen rather than silently swallowing.
 		try {
 			win.close();
 		} catch (e) {
@@ -420,7 +316,6 @@ function injectServerNotification(type: number, body: unknown): void {
 }
 
 function pollDevCommands(): void {
-	if (!debug) return;
 	window.setInterval(async () => {
 		try {
 			const raw = await takeDevCommand();
@@ -452,9 +347,8 @@ function pollDevCommands(): void {
 async function loadIdentity(): Promise<void> {
 	try {
 		const parsed = parseCallableJson<{ steamid64?: string }>(await identity(), {});
-		const id = parsed?.steamid64;
-		if (typeof id === 'string' && /^\d{17}$/.test(id)) me64 = id;
-		dlog(`identity: steamid64=${me64 ?? '(none)'}`);
+		const id = setIdentity(parsed?.steamid64);
+		dlog(`identity: steamid64=${id ?? '(none)'}`);
 	} catch (e) {
 		dlog(`identity failed: ${(e as Error)?.message ?? e}`);
 	}
