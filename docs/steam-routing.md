@@ -209,11 +209,13 @@ toast can be fired from the shell while Steam runs.
 
 A fired test can still be swallowed by the type's own gating, silently: the
 test methods call `OnNotification`, which applies the same suppression real
-notifications get. Known case: SystemUpdate is rate-limited to one toast per
-update type per week (`BSkipSystemUpdateNotification`, in-memory), so a repeat
-of `TestSystemUpdate 1` shows nothing until Steam restarts — fire type 2, or
-restart. When a fire produces a `dev-fire:` log line but no `from-toast` line,
-suspect this class of gate, not the pipeline.
+notifications get. Known case: SystemUpdate (`BSkipSystemUpdateNotification`,
+state held in memory until restart) — the same update type repeats at most
+once a week, and type 1 ("update available") after a type 2 ("restart
+required") is suppressed unconditionally, since a restart notice supersedes an
+availability notice. Both verified by firing. When a fire produces a
+`dev-fire:` log line but no `from-toast` line, suspect this class of gate, not
+the pipeline.
 
 ## Answers to the questions this analysis started from
 

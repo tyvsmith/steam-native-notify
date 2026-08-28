@@ -185,10 +185,11 @@ Partially done on 2026-08-27, against the live client:
   confirmed Steam surfaced on the achievements page and opened Settings. The
   daemon does not auto-fire actions on expiry (verified), so clicks are
   genuine.
-- **Test fires can be swallowed by per-type gating**: SystemUpdate allows one
-  toast per update type per week, in-memory (`BSkipSystemUpdateNotification`),
-  so repeated `TestSystemUpdate 1` fires show nothing until restart. A
-  `dev-fire:` line with no `from-toast` line means a gate, not a break.
+- **Test fires can be swallowed by per-type gating**: SystemUpdate allows the
+  same update type once a week, and suppresses type 1 entirely once a type 2
+  ("restart required") has shown — both in-memory until Steam restarts
+  (`BSkipSystemUpdateNotification`, verified by firing). A `dev-fire:` line
+  with no `from-toast` line means a gate, not a break.
 
 Still open:
 
