@@ -9,11 +9,12 @@ import { loadSettings, settings } from './settings';
  * see; the text a person reads only exists in that popup's DOM. So the bridge
  * has to live in here, where the document is reachable.
  *
- * Two sources are combined. The toast supplies what a person reads -- title,
- * body, artwork -- and Steam's notification feed supplies the typed event behind
- * it, whose protobuf body carries the ids a click needs. They share a counter:
- * feed `index=4` belongs to `notificationtoasts_4_desktop`, and the feed fires
- * roughly 400ms first.
+ * The toast supplies everything: what a person reads -- title, body, artwork --
+ * from its DOM, and the typed notification behind it from its React tree, where
+ * Steam attaches its own decoded object. The notification feed
+ * (`SteamClient.Notifications.RegisterForNotifications`) was used for the typed
+ * half and deleted: it misses types entirely (an incoming voice chat produces no
+ * feed event at all), while the React path sees every source.
  *
  * `g_PopupManager` is not public API. It is what the shipping
  * kitsune-notifications plugin uses to find the same windows, which is the only
@@ -59,13 +60,6 @@ const MANAGER_RETRY_LIMIT = 60; // ~30s, covers a cold Steam start
 const delivered = new Set<string>();
 const registrations: Registration[] = [];
 
-/**
- * Feed events keyed by their index, waiting for the toast that matches. Bounded
- * because a notification Steam never renders would otherwise leak an entry.
- */
-const feedByIndex = new Map<number, { type: number; kind: string; route: string | null }>();
-const FEED_LIMIT = 50;
-
 let debug = true;
 
 function dlog(line: string): void {
@@ -90,71 +84,7 @@ function safeJson(value: unknown): string {
 	}
 }
 
-// --------------------------------------------------------------------------
-// protobuf
-// --------------------------------------------------------------------------
-
 type PbValue = number | bigint | string;
-
-/**
- * Enough protobuf to read a notification body. Steam's notification messages
- * are flat, so nothing recurses.
- */
-function decodeProto(buffer: ArrayBuffer): Map<number, PbValue> {
-	const view = new DataView(buffer);
-	const bytes = new Uint8Array(buffer);
-	const fields = new Map<number, PbValue>();
-	let i = 0;
-
-	const varint = (): number => {
-		let value = 0;
-		let shift = 0;
-		while (i < bytes.length) {
-			const byte = bytes[i++];
-			value += (byte & 0x7f) * Math.pow(2, shift);
-			if (!(byte & 0x80)) break;
-			shift += 7;
-		}
-		return value;
-	};
-
-	while (i < bytes.length) {
-		const key = varint();
-		const field = key >>> 3;
-		switch (key & 7) {
-			case 0:
-				fields.set(field, varint());
-				break;
-			case 1:
-				if (i + 8 > bytes.length) return fields;
-				fields.set(field, view.getBigUint64(i, true));
-				i += 8;
-				break;
-			case 2: {
-				const length = varint();
-				if (i + length > bytes.length) return fields;
-				fields.set(field, new TextDecoder().decode(bytes.subarray(i, i + length)));
-				i += length;
-				break;
-			}
-			case 5:
-				if (i + 4 > bytes.length) return fields;
-				fields.set(field, view.getUint32(i, true));
-				i += 4;
-				break;
-			default:
-				return fields; // groups, which these messages never use
-		}
-	}
-	return fields;
-}
-
-function toBase64(buffer: ArrayBuffer): string {
-	const bytes = new Uint8Array(buffer);
-	let binary = '';
-	for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-	return btoa(binary);
-}
 
 /**
  * The notification Steam attached to the toast, read out of the React tree.
@@ -206,22 +136,9 @@ function notificationFromToast(win: Window): { type: number; fields: Record<stri
 			fiber = fiber.return;
 		}
 	} catch {
-		/* fall back to the feed */
+		/* a toast that cannot be read still gets delivered, just without a route */
 	}
 	return null;
-}
-
-/** Field numbers resolved to their names, using the generated schema. */
-function namedFields(type: number, buffer: ArrayBuffer): Record<string, PbValue> {
-	const schema = fieldsForType(type);
-	if (!schema) return {};
-
-	const named: Record<string, PbValue> = {};
-	for (const [num, value] of decodeProto(buffer)) {
-		const field = schema[num];
-		if (field) named[field.name] = value;
-	}
-	return named;
 }
 
 /**
@@ -286,12 +203,6 @@ function toastName(popup: SteamPopup): string | null {
 	return name;
 }
 
-/** The counter in notificationtoasts_<N>_desktop, or null if it is not one. */
-function toastIndex(name: string): number | null {
-	const m = /^notificationtoasts_(\d+)_desktop$/.exec(name);
-	return m ? Number(m[1]) : null;
-}
-
 /**
  * Steam's toasts put the actor or heading on the first line and the message
  * under it. A single-line toast has no heading, so the app name stands in --
@@ -346,26 +257,20 @@ function readWhenPainted(win: Window, name: string, attempt: number = 0): void {
 
 	const { title, body } = split(text);
 	const image = toastImage(win);
-
-	// React first: it covers notifications the feed never delivers.
 	const fromToast = notificationFromToast(win);
-	const index = toastIndex(name);
-	const feed = index !== null ? feedByIndex.get(index) : undefined;
-	if (index !== null) feedByIndex.delete(index);
 
 	let route: string | null = null;
-	let kind = feed?.kind;
+	let kind: string | undefined;
 	try {
 		if (fromToast) {
-		kind = typeName(fromToast.type);
-		route = routeFor(fromToast.type, fromToast.fields);
-		dlog(`from-toast ${name} type=${fromToast.type} (${kind}) fields=${safeJson(fromToast.fields)}`.slice(0, 700));
+			kind = typeName(fromToast.type);
+			route = routeFor(fromToast.type, fromToast.fields);
+			dlog(`from-toast ${name} type=${fromToast.type} (${kind}) fields=${safeJson(fromToast.fields)}`.slice(0, 700));
 		}
 	} catch (e) {
-		dlog(`from-toast ${name} failed, falling back to the feed: ${(e as Error)?.message ?? e}`);
+		dlog(`from-toast ${name} failed: ${(e as Error)?.message ?? e}`);
 		route = null;
 	}
-	if (route === null) route = feed?.route ?? null;
 	dlog(`toast ${name} -> ${safeJson({ title, body, image, kind, route })}`);
 	void notify({ payload: safeJson({ title, body, image, route }) });
 
@@ -417,65 +322,6 @@ function installHook(attempt: number = 0): void {
 	}
 }
 
-// --------------------------------------------------------------------------
-// notification feed
-// --------------------------------------------------------------------------
-
-function installFeed(attempt: number = 0): void {
-	const sc: any = Reflect.get(globalThis, 'SteamClient');
-	// Two similarly named objects: the feed is on Notifications, while
-	// ClientNotifications only displays and responds to them.
-	const feed = sc?.Notifications;
-
-	if (!feed?.RegisterForNotifications) {
-		if (attempt < MANAGER_RETRY_LIMIT) {
-			setTimeout(() => installFeed(attempt + 1), MANAGER_RETRY_MS);
-		} else {
-			dlog(`no notification feed. SteamClient keys=${JSON.stringify(sc ? Object.keys(sc) : null)}`);
-		}
-		return;
-	}
-
-	try {
-		registrations.push(
-			feed.RegisterForNotifications((index: number, type: number, data: ArrayBuffer) => {
-				const kind = typeName(type);
-				const size = data?.byteLength ?? 0;
-				let route: string | null = null;
-				let described = '(not decoded)';
-
-				try {
-					if (size) {
-						const fields = namedFields(type, data);
-						route = routeFor(type, fields);
-						described = Object.entries(fields)
-							.map(([k, v]) => `${k}=${typeof v === 'string' ? JSON.stringify(v.slice(0, 60)) : String(v)}`)
-							.join(' ') || '(no named fields)';
-					}
-				} catch (e) {
-					described = `decode threw: ${(e as Error)?.message ?? e}`;
-				}
-
-				// A route that comes back null when Steam clearly had the data is
-				// the failure mode worth diagnosing, so log the raw bytes too.
-				dlog(`notif index=${index} bytes=${size} fields: ${described}`.slice(0, 900));
-				if (size > 0 && size < 4096) dlog(`notif index=${index} b64=${toBase64(data)}`);
-
-				if (feedByIndex.size >= FEED_LIMIT) {
-					const oldest = feedByIndex.keys().next().value;
-					if (oldest !== undefined) feedByIndex.delete(oldest);
-				}
-				feedByIndex.set(index, { type, kind, route });
-
-				dlog(`notif index=${index} type=${type} (${kind}) route=${route}`);
-			}),
-		);
-		dlog('notification feed registered');
-	} catch (e) {
-		dlog(`notification feed failed: ${(e as Error)?.message ?? e}`);
-	}
-}
-
 /**
  * IconsModule is typed `any` and resolved from Steam's webpack bundle at
  * runtime, so a name that does not exist compiles cleanly and then renders as
@@ -501,7 +347,6 @@ function pluginIcon(): any {
 export default definePlugin(() => {
 	void loadSettings();
 	installHook();
-	installFeed();
 
 	return {
 		title: 'Steam Native Notify',

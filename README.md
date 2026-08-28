@@ -29,13 +29,9 @@ Nothing else on the system can either, which was checked rather than assumed:
 ## How it works
 
 ```
-Steam event
-   |  SteamClient.Notifications.RegisterForNotifications
-   |    index, type, protobuf body -> decode -> steam:// route (or none)
-   |  ~400ms later
 Toast window (notificationtoasts_<N>_desktop)
    |    innerText -> title / body,  <img>.src -> artwork
-   |    N matches the feed index; that is the correlation key
+   |    React tree -> Steam's own decoded notification -> steam:// route (or none)
    |  callable('Notify') with one JSON argument
 backend/main.lua
    |  spawns tools/notify-action, detached
