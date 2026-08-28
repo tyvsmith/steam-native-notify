@@ -208,6 +208,21 @@ check("escape: entities", escaped_body("a < b & c") == "a &lt; b &amp; c")
 check("escape: ampersand first", escaped_body("&lt;") == "&amp;lt;")
 check("escape: clean text untouched", escaped_body("hello there") == "hello there")
 
+-- notify-action's icon resolution, offline paths only: anything that cannot be
+-- mapped to an existing file must fall back to the "steam" theme icon.
+local function resolved_icon(url)
+	local handle = io.popen(root .. "/tools/notify-action --resolve-icon '" .. url .. "'")
+	local icon = handle:read("*l")
+	handle:close()
+	return icon
+end
+check("resolve-icon: missing library-cache asset falls back",
+	resolved_icon("https://steamloopback.host/assets/999999999/missing.jpg?c=1") == "steam")
+check("resolve-icon: missing absolute path falls back",
+	resolved_icon("/nonexistent/steam-native-notify/icon.png") == "steam")
+check("resolve-icon: garbage falls back",
+	resolved_icon("not a url at all") == "steam")
+
 os.execute = real_execute
 
 print(failures == 0 and "\nPASS" or ("\n" .. failures .. " FAILED"))

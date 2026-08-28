@@ -12,7 +12,8 @@
 		"proto:check": "node tools/proto-sync.mjs --check",
 		"proto:update": "node tools/proto-sync.mjs --update",
 		"gen:table": "node tools/gen-types-table.mjs",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"test": "tools/test-backend && node tools/test-routes"
 	},
 	"dependencies": {
 		"@steambrew/client": "^5.5.14",

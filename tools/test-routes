@@ -1,0 +1,210 @@
+#!/usr/bin/env node
+// Exercise the frontend routing subgraph without Steam.
+//
+// Every expected URL below is a full literal string: these tests lock the
+// verified behavior of routes.ts (docs/steam-routing.md carries the citations),
+// so a routing change must show up here as a changed literal, reviewed as such.
+
+import { loadFrontendModules } from './load-frontend.mjs';
+
+const mods = loadFrontendModules(['routes', 'urlstore', 'identity', 'notification', 'generated/notifications']);
+const { routes, urlstore, identity, notification } = mods;
+const schema = mods['generated/notifications'];
+
+let failures = 0;
+function check(what, ok, detail) {
+	if (ok) {
+		console.log(`  ok   ${what}`);
+	} else {
+		failures += 1;
+		console.log(`  FAIL ${what}${detail ? `\n       ${detail}` : ''}`);
+	}
+}
+function is(what, got, want) {
+	check(what, Object.is(got, want), `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+}
+
+// The templates a live client served (docs/steam-routing.md, "The URL store"),
+// and a well-formed identity: the same seed gen-types-table.mjs derives from.
+const TEMPLATES = {
+	CommunityFrontPage: 'https://steamcommunity.com/',
+	StoreFrontPage: 'https://store.steampowered.com/',
+	HelpFrontPage: 'https://help.steampowered.com/en/',
+	PendingGift: 'https://store.steampowered.com/gifts/',
+	SteamIDAchievementsPage: 'https://steamcommunity.com/%mystuff%/stats/appid/%p1%/achievements/',
+};
+urlstore.seedUrlTemplates(TEMPLATES);
+identity.setIdentity('76561197960287930');
+
+// --- clientRoute -----------------------------------------------------------
+
+for (const type of [1, 15, 16]) {
+	is(`clientRoute ${type} routes to the app's library page`,
+		routes.clientRoute(type, { appid: 570 }), 'steam://nav/games/details/570');
+}
+for (const type of [3, 4, 8, 17]) {
+	is(`clientRoute ${type} opens chat (steamid as string)`,
+		routes.clientRoute(type, { steamid: '76561198000000000' }), 'steam://friends/message/76561198000000000');
+	is(`clientRoute ${type} opens chat (steamid as bigint)`,
+		routes.clientRoute(type, { steamid: 76561198000000000n }), 'steam://friends/message/76561198000000000');
+}
+is('clientRoute 5 resolves the achievements template',
+	routes.clientRoute(5, { appid: 570 }),
+	'steam://openurl/https://steamcommunity.com/profiles/76561197960287930/stats/appid/570/achievements/');
+is('clientRoute 7 opens system settings', routes.clientRoute(7, {}), 'steam://settings/system');
+is('clientRoute 61 opens controller settings', routes.clientRoute(61, {}), 'steam://settings/controller');
+is('clientRoute 10 opens the pending invites page',
+	routes.clientRoute(10, {}),
+	'steam://openurl/https://steamcommunity.com/profiles/76561197960287930/friends/pending');
+is('clientRoute 9 (group chat) routes nothing', routes.clientRoute(9, {}), null);
+is('clientRoute unknown type routes nothing', routes.clientRoute(999, {}), null);
+
+// Null discipline: a rule missing its identity, template, or a well-formed
+// field must drop the route, never emit a broken URL.
+identity.setIdentity(undefined);
+is('clientRoute 5 without identity routes nothing', routes.clientRoute(5, { appid: 570 }), null);
+identity.setIdentity('76561197960287930');
+is('clientRoute 5 with a string appid routes nothing', routes.clientRoute(5, { appid: '570' }), null);
+is('clientRoute 5 with appid 0 routes nothing', routes.clientRoute(5, { appid: 0 }), null);
+is('clientRoute 3 rejects a non-17-digit steamid', routes.clientRoute(3, { steamid: '12345' }), null);
+urlstore.seedUrlTemplates({});
+is('clientRoute 5 without templates routes nothing', routes.clientRoute(5, { appid: 570 }), null);
+is('clientRoute 10 without templates routes nothing', routes.clientRoute(10, {}), null);
+urlstore.seedUrlTemplates(TEMPLATES);
+
+// --- serverRoute -----------------------------------------------------------
+
+function server(type, body = {}, url) {
+	return routes.serverRoute({ type, body, url });
+}
+
+is('serverRoute 2 Gift opens the pending gifts page',
+	server(2), 'steam://openurl/https://store.steampowered.com/gifts/');
+is('serverRoute 3 Comment appends the rollup url to community',
+	server(3, {}, 'id/example/recommended/1/#comment_2'),
+	'steam://openurl/https://steamcommunity.com/id/example/recommended/1/#comment_2');
+is('serverRoute 3 Comment without a url routes nothing', server(3), null);
+is('serverRoute 4 Item opens my inventory',
+	server(4), 'steam://openurl/https://steamcommunity.com/profiles/76561197960287930/inventory');
+is('serverRoute 5 FriendInvite opens the pending invites page',
+	server(5), 'steam://openurl/https://steamcommunity.com/profiles/76561197960287930/friends/pending');
+is('serverRoute 6 MajorSale opens the body link',
+	server(6, { link: 'https://store.steampowered.com/sale/example/' }),
+	'steam://openurl/https://store.steampowered.com/sale/example/');
+is('serverRoute 6 without a link routes nothing', server(6), null);
+is('serverRoute 10 General opens the body link',
+	server(10, { link: 'https://store.steampowered.com/news/' }),
+	'steam://openurl/https://store.steampowered.com/news/');
+is('serverRoute 10 without a link routes nothing', server(10), null);
+is('serverRoute 8 Wishlist with several apps filters the wishlist to them',
+	server(8, { count: 2, appids: [10, 20] }),
+	'steam://openurl/https://store.steampowered.com/wishlist/profiles/76561197960287930/?wng=10,20#sort=discount');
+is('serverRoute 8 Wishlist with one app addresses it with ?appid=',
+	server(8, { count: 1, appid: 1073390 }),
+	'steam://openurl/https://store.steampowered.com/wishlist/profiles/76561197960287930/?appid=1073390#sort=discount');
+is('serverRoute 9 TradeOffer opens my trade offers',
+	server(9), 'steam://openurl/https://steamcommunity.com/profiles/76561197960287930/tradeoffers');
+is('serverRoute 11 HelpRequest opens the ticket wizard (number)',
+	server(11, { ticket: 123 }), 'steam://openurl/https://help.steampowered.com/en/wizard/HelpRequest/123');
+is('serverRoute 11 HelpRequest opens the ticket wizard (string)',
+	server(11, { ticket: '123' }), 'steam://openurl/https://help.steampowered.com/en/wizard/HelpRequest/123');
+is('serverRoute 12 AsyncGame opens my game notifications',
+	server(12), 'steam://openurl/https://steamcommunity.com/my/gamenotifications/');
+is('serverRoute 14 ModeratorMsg opens the message',
+	server(14, { msgid: 5 }), 'steam://openurl/https://steamcommunity.com/my/moderatormessages/5');
+is('serverRoute 16 FamilyInvite opens the join page',
+	server(16, { familyid: 9 }),
+	'steam://openurl/https://store.steampowered.com/account/familymanagement/join?invitation=9');
+for (const type of [15, 17, 18, 19, 20, 21]) {
+	is(`serverRoute ${type} opens the family requests tab`,
+		server(type), 'steam://openurl/https://store.steampowered.com/account/familymanagement?tab=requests');
+}
+is('serverRoute 28 PlaytestInvite opens the gated-access page',
+	server(28, { appid: 1073390 }),
+	'steam://openurl/https://store.steampowered.com/account/gatedaccess?appid=1073390');
+is('serverRoute 28 without an appid routes nothing', server(28), null);
+is('serverRoute 29 TradeReversal opens my trade history',
+	server(29), 'steam://openurl/https://steamcommunity.com/my/tradehistory');
+is('serverRoute 22 RequestedGameAdded routes nothing', server(22), null);
+is('serverRoute 24 ClipDownloaded routes nothing', server(24), null);
+
+// --- urlstore --------------------------------------------------------------
+
+is('resolveUrl substitutes %p1%',
+	urlstore.resolveUrl('SteamIDAchievementsPage', 570),
+	'https://steamcommunity.com/%mystuff%/stats/appid/570/achievements/');
+is('resolveUrl leaves an unsupplied parameter as-is',
+	urlstore.resolveUrl('SteamIDAchievementsPage'),
+	'https://steamcommunity.com/%mystuff%/stats/appid/%p1%/achievements/');
+urlstore.seedUrlTemplates({});
+is('resolveUrl of a missing template is null', urlstore.resolveUrl('CommunityFrontPage'), null);
+urlstore.seedUrlTemplates(TEMPLATES);
+
+// --- identity --------------------------------------------------------------
+
+is('setIdentity accepts a steamid64', identity.setIdentity('76561197960287930'), '76561197960287930');
+is('myProfilePath addresses the profile', identity.myProfilePath(), 'profiles/76561197960287930');
+is('setIdentity rejects 16 digits', identity.setIdentity('7656119796028793'), null);
+is('myProfilePath without identity is null', identity.myProfilePath(), null);
+is('setIdentity rejects non-digits', identity.setIdentity('7656119796028793x'), null);
+is('setIdentity rejects a non-string', identity.setIdentity(76561197960287930), null);
+identity.setIdentity('76561197960287930');
+
+// --- notificationFromToast -------------------------------------------------
+
+// The real input is a popup window whose React tree carries Steam's decoded
+// notification; these fixtures fake just the surfaces it reads -- an element
+// list with a __reactFiber key and a fiber chain -- with plain objects.
+function fiberChain(props, depth) {
+	let fiber = { memoizedProps: { notification: props } };
+	for (let i = 0; i < depth; i++) fiber = { memoizedProps: {}, return: fiber };
+	return fiber;
+}
+function toastWindow(fiber) {
+	const el = fiber ? { __reactFiber$test: fiber } : {};
+	return { document: { querySelectorAll: () => [el] } };
+}
+
+const downloadFields = schema.fieldsForType(1);
+const appidField = Number(Object.keys(downloadFields).find((n) => downloadFields[n].name === 'appid'));
+const clientArray = [];
+clientArray[appidField - 1] = 570; // arrayIndexOffset_ -1 puts field N at N-1
+
+const client = notification.notificationFromToast(
+	toastWindow(fiberChain({ eType: 1, eSource: 1, data: { array: clientArray, arrayIndexOffset_: -1 } }, 0)),
+);
+check('client toast decodes', client !== null && client.source === 'client', JSON.stringify(client));
+if (client?.source === 'client') {
+	is('client toast carries the type', client.type, 1);
+	is('client toast decodes appid by field number', client.fields.appid, 570);
+}
+
+const srv = notification.notificationFromToast(
+	toastWindow(fiberChain(
+		{ eType: 27, eSource: 2, data: { type: 9, item: { body_data: '{"tradeofferid":"55"}' }, url: 'x/y' } }, 0,
+	)),
+);
+check('server toast decodes', srv !== null && srv.source === 'server', JSON.stringify(srv));
+if (srv?.source === 'server') {
+	is('server toast carries the type', srv.type, 27);
+	is('server toast carries the rollup type', srv.server.type, 9);
+	is('server toast parses body_data', srv.server.body?.tradeofferid, '55');
+	is('server toast carries the url', srv.server.url, 'x/y');
+}
+
+const badBody = notification.notificationFromToast(
+	toastWindow(fiberChain({ eType: 27, eSource: 2, data: { type: 9, item: { body_data: 'not json' } } }, 0)),
+);
+check('unparseable body_data decodes with body null',
+	badBody?.source === 'server' && badBody.server.body === null, JSON.stringify(badBody));
+
+const deep = notification.notificationFromToast(
+	toastWindow(fiberChain({ eType: 1, eSource: 1, data: { array: clientArray, arrayIndexOffset_: -1 } }, 2)),
+);
+check('notification found up the fiber.return chain',
+	deep?.source === 'client' && deep.fields.appid === 570, JSON.stringify(deep));
+
+is('a window with no fiber yields null', notification.notificationFromToast(toastWindow(null)), null);
+
+console.log(failures === 0 ? '\nPASS' : `\n${failures} FAILED`);
+process.exit(failures === 0 ? 0 : 1);
