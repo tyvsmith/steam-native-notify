@@ -193,10 +193,10 @@ Partially done on 2026-08-27, against the live client:
 
 - **The server (eSource=2) path is verified via injection**: `tools/fire
   --server` hands a synthetic rollup to Steam's real `OnServerNotification`
-  ingestion. A Gift toast rendered through Steam's own component, extraction
-  read `data.type` and `data.item.body_data` as coded, and the route resolved
-  to `steam://openurl/` + the `PendingGift` template — the first server-
-  sourced capture, without waiting for a live event.
+  ingestion. Gift and TradeOffer toasts rendered through Steam's own
+  components, extraction read `data.type` and `data.item.body_data` as coded,
+  and the routes resolved to the store gifts page and the user's trade offers
+  page — the first server-sourced captures, without waiting for a live event.
 - **Server toasts obey the user's notification preferences**: on this machine
   Wishlist, Comment, Item, HelpRequest and PlaytestInvite have the toast bit
   off (`CachedNotificationPreferences` in localconfig.vdf), so those types
