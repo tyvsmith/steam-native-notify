@@ -29,7 +29,7 @@ export function settings(): Settings {
  * wrapped in literal quote characters and needs unwrapping before it parses as
  * the object it represents.
  */
-function parseCallableJson<T>(raw: unknown, fallback: T): T {
+export function parseCallableJson<T>(raw: unknown, fallback: T): T {
 	if (typeof raw !== 'string') return (raw as T) ?? fallback;
 	try {
 		const once = JSON.parse(raw);

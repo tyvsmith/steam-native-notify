@@ -136,6 +136,34 @@ check("LoadSettings reflects it", type(loaded) == "string" and loaded:find("true
 ok = pcall(SaveSettings, "not json")
 check("SaveSettings survives garbage", ok)
 
+-- Identity: shape only. The steamid comes from the machine's loginusers.vdf,
+-- which this test does not fabricate; present it must be a steamid64, absent
+-- the object is simply empty and the frontend routes without one.
+local id_json
+ok, id_json = pcall(Identity)
+check("Identity runs", ok, id_json)
+check("Identity returns JSON", type(id_json) == "string" and id_json:sub(1, 1) == "{", tostring(id_json))
+if type(id_json) == "string" and id_json:find("steamid64") then
+	check("Identity id is a steamid64", id_json:find('"7656119%d%d%d%d%d%d%d%d%d%d"') ~= nil, id_json)
+end
+
+-- TakeDevCommand: consume-once semantics against the real plugin directory
+-- (the repo, when installed as a symlink). Skipped when not installed.
+local plugin_dir = (os.getenv("HOME") or "") .. "/.local/share/millennium/plugins/steam-native-notify"
+local fire = io.open(plugin_dir .. "/.dev-fire", "w")
+if fire then
+	fire:write('{"call":"TestFriendOnline","args":[]}')
+	fire:close()
+	local taken
+	ok, taken = pcall(TakeDevCommand)
+	check("TakeDevCommand runs", ok, taken)
+	check("TakeDevCommand returns the command", type(taken) == "string" and taken:find("TestFriendOnline") ~= nil, tostring(taken))
+	ok, taken = pcall(TakeDevCommand)
+	check("TakeDevCommand consumes once", ok and taken == "", tostring(taken))
+else
+	print("  skip TakeDevCommand (plugin not installed at " .. plugin_dir .. ")")
+end
+
 -- Garbage in must not throw.
 executed = {}
 ok = pcall(Notify, "not json at all")

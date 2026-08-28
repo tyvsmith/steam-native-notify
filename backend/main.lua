@@ -119,6 +119,56 @@ function Log(line)
     return "ok"
 end
 
+--- The current user's steamid64, from loginusers.vdf ("MostRecent" "1").
+--- Server-notification routes point at the user's own community pages
+--- (profiles/<steamid64>/tradeoffers and the like), exactly as Steam's own
+--- click handlers build them; the frontend has no filesystem, so this end
+--- supplies the id.
+local function most_recent_steamid()
+    local candidates = {
+        (os.getenv("HOME") or "") .. "/.steam/steam/config/loginusers.vdf",
+        (os.getenv("HOME") or "") .. "/.local/share/Steam/config/loginusers.vdf",
+    }
+    for _, path in ipairs(candidates) do
+        local handle = io.open(path, "r")
+        if handle then
+            local current, fallback = nil, nil
+            for line in handle:lines() do
+                local id = line:match('^%s*"(7656119%d%d%d%d%d%d%d%d%d%d)"%s*$')
+                if id then
+                    current = id
+                    fallback = fallback or id
+                elseif current and line:match('"[Mm]ost[Rr]ecent"%s*"1"') then
+                    handle:close()
+                    return current
+                end
+            end
+            handle:close()
+            -- No MostRecent flag: a single-user file still identifies the user.
+            if fallback then return fallback end
+        end
+    end
+    return nil
+end
+
+function Identity()
+    return json.encode({ steamid64 = most_recent_steamid() })
+end
+
+--- Dev trigger: tools/fire writes PLUGIN_DIR/.dev-fire; the frontend polls this
+--- callable and executes the named NotificationStore test method. Consume-once:
+--- the file is deleted before its content is returned, so a command fires one
+--- toast, not one per poll.
+function TakeDevCommand()
+    local path = PLUGIN_DIR .. "/.dev-fire"
+    local handle = io.open(path, "r")
+    if not handle then return "" end
+    local content = handle:read("*a") or ""
+    handle:close()
+    os.remove(path)
+    return content
+end
+
 local function on_load()
     logger:info("[steam-native-notify] backend loaded")
 

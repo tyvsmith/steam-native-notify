@@ -1,12 +1,15 @@
 # Handoff
 
 A Millennium plugin that mirrors Steam's in-client notification toasts to the
-desktop notification daemon. Capture, artwork and delivery work. Clicking works
-for four notification types. The open problem is making click routing general
-instead of per-type.
+desktop notification daemon. Capture, artwork and delivery work. Click routing
+is now built on Steam's own logic, read out of the shipped UI bundle: 28 of 62
+types route, the rest are inert in Steam itself or open dialogs no URL can
+reach. The open problem is runtime verification: the catalog is cited but most
+routes have not yet fired on a live client.
 
-Read `README.md` for the architecture and `docs/notification-types.md` for the
-type table. This file is the working context that is not obvious from the code.
+Read `README.md` for the architecture, `docs/notification-types.md` for the
+per-type table, and `docs/steam-routing.md` for the bundle analysis every route
+cites. This file is the working context that is not obvious from the code.
 
 ## Working on this: read before touching anything
 
@@ -51,13 +54,17 @@ inside the existing window. If you are not looking at Steam, a successful
 navigation is indistinguishable from nothing happening. That produced a fourth
 wrong conclusion.
 
-**Triggering notifications.** Download completion is the only reliable
-self-service trigger: uninstall and reinstall a small game (Aircar, appid
-1073390, 0.89GB) via `steam steam://uninstall/1073390` then
-`steam steam://install/1073390`. Friend online, friend in game, incoming voice
-chat and friend messages all need another person. Wishlist, comment, trade offer,
-major sale and Steam Turn cannot be triggered at all without a second account or
-a server-side event, and none has ever been observed here.
+**Triggering notifications.** `tools/fire TestDownloadComplete 1073390` pushes
+a real synthesized notification through Steam's full toast pipeline: Steam's
+own NotificationStore (a shared-context global) carries per-type test methods,
+the plugin's debug poll executes the named one within ~3s. This covers most
+client types (`TestFriendOnline`, `TestFriendMessage`, `TestAchievement`,
+`TestIncomingVoiceChat`, ...; search `strTest:` in the bundle). Server-backed
+types (Wishlist, TradeOffer, Comment, MajorSale...) cannot be fired this way:
+their test path is an empty function in the shipped client, so they still need
+a real event. Download completion remains the only real-event self-service
+trigger: `steam steam://uninstall/1073390` then `steam steam://install/1073390`
+(Aircar, 0.89GB).
 
 ## What is verified
 
@@ -72,8 +79,12 @@ a server-side event, and none has ever been observed here.
   `RegisterForNotifications` event at all. Every route currently produced comes
   from React; the feed contributes nothing and should be deleted.
 - `response_steamurl` is the only route-shaped field in the client schema and
-  **arrives empty** on real friend messages. Do not build on it.
+  **arrives empty** on real friend messages. The bundle shows why it looked
+  authoritative and is not: when non-empty it backs only the tray options
+  button and the gamepad "Accept" menu, never the desktop body click.
 - `fnNotificationResolved` is present as a key and `undefined` in every sample.
+  The bundle settles what it is: a dismissal predicate the toast animation loop
+  polls each frame, fading the toast when it returns true. Not routing.
 - Toast artwork: `steamloopback.host/assets/<appid>/<file>` maps to
   `~/.local/share/Steam/appcache/librarycache/<appid>/<file>`. Friend avatars are
   public CDN URLs and are fetched once and cached.
@@ -89,8 +100,10 @@ a server-side event, and none has ever been observed here.
 | IncomingVoiceChat (17) | opens the chat, does not accept | same |
 | DownloadCompleted (1) | switches library to that game | same |
 
-Everything else is unobserved. `FriendInGame` and `FriendInvite` carry a
-`steamid` and probably behave like the others, but have never been clicked.
+All four match what the bundle says those components do, which is the
+cross-check that made building the rest of the catalog from the bundle alone
+defensible. The full per-type inventory is `docs/notification-types.md`; the
+citations are `docs/steam-routing.md`.
 
 ## Dead ends: do not redo these
 
@@ -110,68 +123,71 @@ Everything else is unobserved. `FriendInGame` and `FriendInvite` carry a
 - **Compositor rules for hiding Steam's toast.** The plugin closes the popup
   itself after reading it, which is portable and knows the read succeeded.
 
-## The open problem
+## The routing question, resolved
 
-Routing is currently two rules plus per-type gating, derived from four observed
-types. That does not scale to 63 types and it is not what Steam does internally.
+The 2024-era leads all closed at once by reading the shipped UI bundle on disk
+(`~/.local/share/Steam/steamui/chunk~*.js`, beautified). Full write-up with
+module references and provenance: `docs/steam-routing.md`. The short version:
 
-Steam clearly has universal navigation logic: every notification in the client,
-the mobile app and the website knows where it goes. Find it rather than
-reconstructing it type by type.
+- **There is no single resolver field.** `fnNotificationResolved` is toast
+  dismissal, not routing. Routing is a per-type component dispatch whose
+  activate handlers bottom out in a small vocabulary: chat dialogs, library
+  navigation, settings pages, URL-store lookups, modals, or nothing.
+- **The server (web) notification system is genuinely data-driven**: type-keyed
+  registries turn `body_data` JSON into an https URL, navigated via
+  `SteamWeb(url)` — which is literally `location.href = "steam://openurl/" +
+  url`. Wishlist, TradeOffer, Comment, MajorSale and the rest of the June-2023
+  clickable set live there, mapped onto client eTypes by a 23-entry table.
+  `eSource=2` on the React object marks them; their `data` is a rollup object,
+  not a Closure protobuf.
+- **Steam's URL construction is reachable**: `SteamClient.URL.GetSteamURLList`
+  serves the same named templates Steam's own `CURLStore` resolves, and the
+  plugin fetches them at startup. `steam://url/<Name>/<params>` and
+  `steam://openurl/<url>` are handled by the client with exactly the calls the
+  notification components make.
+- The expected person/game/store/account grouping is real but secondary; the
+  primary split is client-handled vs server-webbed, then by activate primitive.
 
-Expected shape of the answer, from the notification types themselves:
-
-- **person-bound** — friend message, friend online, friend in game, friend
-  invite, incoming voice chat, group chat
-- **game-bound** — download complete, achievement, requested game added, playtest
-  invite, an invite to play
-- **store-bound** — wishlist, major sale, item announcement
-- **account-bound** — trade offer, help request, family and parental requests,
-  moderator message
-
-### Leads worth pursuing, roughly in order
-
-1. **Find Steam's own notification navigation function.** Millennium exposes
-   webpack module search (`findModuleExport`, `findAllModules`, `classMap` in the
-   SDK). Steam's UI bundle almost certainly contains a single function that takes
-   a notification and navigates. Locate it, then call it and let Steam route. This
-   is the most likely form of the universal mapping.
-2. **Stringify the toast's click handler.** The React fiber chain has an `onClick`
-   somewhere above the toast body. `Function.prototype.toString()` on it, even
-   minified, reveals which function it delegates to; then search the modules for
-   that name.
-3. **Capture a web-schema notification.** The six clickable types Valve added in
-   the [June 2023 client update](https://store.steampowered.com/oldnews/195171)
-   come from `steammessages_notifications.steamclient.proto`, whose
-   `SteamNotificationData.body_data` is a JSON blob. That JSON is how Steam routes
-   them, and it has never been seen here. `eSource` on the React notification
-   object distinguishes the two systems; only `eSource=1` has been observed.
-4. **Check whether `fnNotificationResolved` is ever populated.** If some types
-   supply it, it is Steam's own resolver and should be preferred over any URL.
-5. **Enumerate the `steam://` scheme.** SteamTracking and the community have
-   partial lists. A `steam://` route that Steam itself constructs is better
-   evidence than one we invent.
+Routing now implements that catalog (`frontend/routes.ts`), with each rule
+citing its row in `docs/steam-routing.md`. 28 of 62 types route; the rest are
+inert in Steam or open dialogs no URL reaches (group chat rooms, Media items,
+modals).
 
 ### Constraint the user has been firm about, and was right about
 
 **Mirror Steam, do not invent.** Every invented route in this project's history
-had to be torn out. A notification whose click does nothing is correct if Steam's
-own toast does nothing. When adding a route, cite the observation or the Steam
-code path it came from.
+had to be torn out — the Achievement route was the latest: it pointed at the
+game's library page until the bundle showed Steam opens the achievements page.
+A notification whose click does nothing is correct if Steam's own toast does
+nothing. When adding a route, cite the observation or the Steam code path it
+came from.
 
-## Recommended cleanup, agreed but not yet done
+## The open problem: runtime verification
 
-- Delete the feed subscription, index correlation, the protobuf byte decoder and
-  `toBase64`. React supersedes all of it. Roughly 200 lines.
-- Collapse `routeFor` to name-based rules and drop per-type gating.
-- **Keep the generated schema.** `data.array` is positional, and shape-guessing
-  without field names misroutes: `FriendInviteRollup` carries `new_invite_count`,
-  so a count of 3 becomes `steam://nav/games/details/3`.
+The catalog is cited, built, and type-checked, but mostly unfired. In order:
+
+1. **Restart Steam fully** (frontend changed), confirm via `tools/capture`.
+2. **Client types via `tools/fire`**: TestDownloadComplete, TestFriendOnline,
+   TestAchievement, TestIncomingVoiceChat, TestSystemUpdate... For each: does
+   the desktop notification appear, does its click land where Steam's own
+   toast click lands. Check the `url templates:` and `identity:` lines in the
+   log first; every openurl route depends on them.
+3. **Server types need real events.** The next wishlist sale or trade offer is
+   the first live `eSource=2` capture ever; the debug log dumps the whole
+   rollup (`server type=... body=...`), so one event verifies the field names
+   the routes read (`body.link`, `body.ticket`, rollup `url`...). Check those
+   against `frontend/routes.ts` before trusting the route.
+4. **`steam://openurl/` from outside the client** is the one delivery
+   equivalence not yet exercised: Steam's own SteamWeb emits it from inside;
+   `tools/notify-action` will hand it to the `steam` binary from outside.
+   Verify once with a fired Achievement toast.
 
 ## Open question deferred
 
 `steam://nav/...` reuses the existing Steam window, so nothing opens and nothing
 raises. A focus call was implemented, then removed, and the case for it is now
 stronger: Steam's own toast can only be clicked while Steam has focus, so
-"clicked while looking at Steam" is the baseline. A best-effort focus in
-`tools/notify-action` would be the only window-manager dependency in the project.
+"clicked while looking at Steam" is the baseline. Chat routes are the exception:
+the client's `friends/message` handler passes `btakefocus=1` itself. A
+best-effort focus in `tools/notify-action` would be the only window-manager
+dependency in the project.

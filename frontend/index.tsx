@@ -1,7 +1,15 @@
 import { callable, definePlugin, IconsModule } from '@steambrew/client';
 import { fieldsForType, typeName } from './generated/notifications';
+import {
+	clientRoute,
+	serverRoute,
+	SOURCE_SERVER,
+	type PbValue,
+	type ServerNotification,
+} from './routes';
+import { loadUrlTemplates } from './urlstore';
 import { SettingsPanel } from './Settings';
-import { loadSettings, settings } from './settings';
+import { loadSettings, parseCallableJson, settings } from './settings';
 
 /**
  * Steam draws every notification as its own CEF popup window, named
@@ -44,6 +52,8 @@ const TOAST_PREFIX = 'notificationtoasts_';
  */
 const notify = callable<[{ payload: string }], string>('Notify');
 const logLine = callable<[{ line: string }], string>('Log');
+const identity = callable<[], string>('Identity');
+const takeDevCommand = callable<[], string>('TakeDevCommand');
 
 /**
  * The popup window exists before it has painted, so a single settle delay is a
@@ -84,7 +94,15 @@ function safeJson(value: unknown): string {
 	}
 }
 
-type PbValue = number | bigint | string;
+interface ToastNotification {
+	type: number;
+	/** eSource: 1 = classic client notification, 2 = the server (web) system. */
+	source: number;
+	/** Client-sourced: fields decoded from the Closure array via the schema. */
+	fields: Record<string, PbValue>;
+	/** Server-sourced: the rollup's type, parsed body_data and url. */
+	server: ServerNotification | null;
+}
 
 /**
  * The notification Steam attached to the toast, read out of the React tree.
@@ -94,11 +112,13 @@ type PbValue = number | bigint | string;
  * anything relying on the feed cannot route it. The toast is rendered from
  * whatever produced the notification, so reading it here covers every source.
  *
- * `data` is Steam's own decoded protobuf message, a Closure wrapper whose values
- * sit in `array` at `fieldNumber + arrayIndexOffset_`. Field names still come
- * from the generated schema; only the byte-level decoding is skipped.
+ * The shape of `data` depends on `eSource` (docs/steam-routing.md):
+ * client-sourced, it is Steam's own decoded protobuf message, a Closure wrapper
+ * whose values sit in `array` at `fieldNumber + arrayIndexOffset_`; field names
+ * come from the generated schema. Server-sourced, it is a plain rollup object
+ * `{ type, item, ... }` whose `item.body_data` is a JSON string.
  */
-function notificationFromToast(win: Window): { type: number; fields: Record<string, PbValue> } | null {
+function notificationFromToast(win: Window): ToastNotification | null {
 	try {
 		const doc = win.document;
 		if (!doc) return null;
@@ -119,19 +139,36 @@ function notificationFromToast(win: Window): { type: number; fields: Record<stri
 			const notification = (fiber.memoizedProps ?? fiber.pendingProps)?.notification;
 			if (notification && typeof notification === 'object') {
 				const type = Number((notification as any).eType);
+				const source = Number((notification as any).eSource);
 				const data = (notification as any).data;
-				const schema = fieldsForType(type);
 				const fields: Record<string, PbValue> = {};
+				let server: ServerNotification | null = null;
 
-				const array = data?.array;
-				const offset = typeof data?.arrayIndexOffset_ === 'number' ? data.arrayIndexOffset_ : -1;
-				if (schema && Array.isArray(array)) {
-					for (const [num, field] of Object.entries(schema)) {
-						const value = array[Number(num) + offset];
-						if (value !== undefined && value !== null) fields[field.name] = value as PbValue;
+				if (source === SOURCE_SERVER) {
+					let body: Record<string, unknown> | null = null;
+					try {
+						const raw = data?.item?.body_data;
+						if (typeof raw === 'string' && raw) body = JSON.parse(raw);
+					} catch {
+						/* an unparseable body routes as null, and the raw dump below shows why */
+					}
+					server = {
+						type: Number(data?.type),
+						body,
+						url: typeof data?.url === 'string' ? data.url : undefined,
+					};
+				} else {
+					const schema = fieldsForType(type);
+					const array = data?.array;
+					const offset = typeof data?.arrayIndexOffset_ === 'number' ? data.arrayIndexOffset_ : -1;
+					if (schema && Array.isArray(array)) {
+						for (const [num, field] of Object.entries(schema)) {
+							const value = array[Number(num) + offset];
+							if (value !== undefined && value !== null) fields[field.name] = value as PbValue;
+						}
 					}
 				}
-				return { type, fields };
+				return { type, source, fields, server };
 			}
 			fiber = fiber.return;
 		}
@@ -142,55 +179,16 @@ function notificationFromToast(win: Window): { type: number; fields: Record<stri
 }
 
 /**
- * The steam:// route a notification's click should follow, or null when Steam
- * itself does nothing.
- *
- * Mirroring, not improving: each rule matches behaviour observed by clicking
- * Steam's own toast while watching the client.
- *
- *   FriendMessage      opens the chat with the sender
- *   DownloadCompleted  switches the library to that game
- *
- * `response_steamurl` looked authoritative, being the only route-shaped field in
- * the schema, but a real friend message decoded with it set to "". Steam
- * declares it and does not fill it, so it is checked and then not relied on.
- *
- * Types are gated explicitly. FriendOnline carries a steamid too, but whether
- * its toast does anything is unestablished, and routing on the mere presence of
- * an id is how the earlier invented routes crept in.
+ * The current user's steamid64, from the backend (loginusers.vdf). Server-side
+ * notification routes to "my" community pages need it; missing, those routes
+ * come back null rather than broken.
  */
-function routeFor(type: number, fields: Record<string, PbValue>): string | null {
-	const url = fields.response_steamurl;
-	if (typeof url === 'string' && url.startsWith('steam://')) return url;
+let me64: string | null = null;
 
-	// Everything friend-shaped opens the chat with that person. Observed on
-	// Steam's own toasts, with a Steam window focused -- which turns out to be
-	// required for a toast to be clickable at all, and is why several earlier
-	// readings of "it does nothing" were wrong.
-	//
-	//   8  FriendMessage       observed
-	//   4  FriendOnline        observed
-	//  17  IncomingVoiceChat   observed; opens the chat, does not accept the call
-	//   9  GroupChatMessage    not observed, same shape and a chat id
-	//
-	// Deliberately absent: FriendInvite (2) and FriendInGame (3). Both carry a
-	// steamid and probably behave the same, but "has a steamid" is the reasoning
-	// that produced the invented routes earlier, so they wait for a real click.
-	if (type === 8 || type === 9 || type === 4 || type === 17) {
-		const person = fields.steamid ?? fields.steamid_sender;
-		if (typeof person === 'bigint') return `steam://friends/message/${person.toString()}`;
-		if (typeof person === 'string' && /^\d{17}$/.test(person)) {
-			return `steam://friends/message/${person}`;
-		}
-	}
-
-	// DownloadCompleted, Achievement.
-	if (type === 1 || type === 5) {
-		const appid = fields.appid;
-		if (typeof appid === 'number' && appid > 0) return `steam://nav/games/details/${appid}`;
-	}
-
-	return null;
+/** Route the way Steam would; the rules and their citations live in routes.ts. */
+function routeFor(n: ToastNotification): string | null {
+	if (n.source === SOURCE_SERVER && n.server) return serverRoute(n.server, me64);
+	return clientRoute(n.type, n.fields, me64);
 }
 
 // --------------------------------------------------------------------------
@@ -264,8 +262,12 @@ function readWhenPainted(win: Window, name: string, attempt: number = 0): void {
 	try {
 		if (fromToast) {
 			kind = typeName(fromToast.type);
-			route = routeFor(fromToast.type, fromToast.fields);
-			dlog(`from-toast ${name} type=${fromToast.type} (${kind}) fields=${safeJson(fromToast.fields)}`.slice(0, 700));
+			route = routeFor(fromToast);
+			const detail =
+				fromToast.source === SOURCE_SERVER
+					? `server type=${fromToast.server?.type} url=${fromToast.server?.url ?? ''} body=${safeJson(fromToast.server?.body)}`
+					: `fields=${safeJson(fromToast.fields)}`;
+			dlog(`from-toast ${name} type=${fromToast.type} (${kind}) source=${fromToast.source} ${detail}`.slice(0, 700));
 		}
 	} catch (e) {
 		dlog(`from-toast ${name} failed: ${(e as Error)?.message ?? e}`);
@@ -344,9 +346,54 @@ function pluginIcon(): any {
 	return null;
 }
 
+/**
+ * Dev trigger: `tools/fire` writes a command file; the backend hands it over
+ * exactly once via TakeDevCommand. The command names a test method on Steam's
+ * own NotificationStore (a shared-context global, `window.NotificationStore`),
+ * whose Test* functions push a real synthesized notification through the full
+ * toast pipeline -- the only self-service way to exercise most types.
+ * Debug-only machinery; the notification path never depends on it.
+ */
+const DEV_POLL_MS = 3000;
+
+function pollDevCommands(): void {
+	if (!debug) return;
+	window.setInterval(async () => {
+		try {
+			const raw = await takeDevCommand();
+			const cmd = parseCallableJson<{ call?: string; args?: unknown[] } | null>(raw, null);
+			if (!cmd?.call) return;
+			const store: any = Reflect.get(globalThis, 'NotificationStore');
+			const fn = store?.[cmd.call];
+			if (typeof fn !== 'function') {
+				dlog(`dev-fire: NotificationStore.${cmd.call} is not a function`);
+				return;
+			}
+			dlog(`dev-fire: NotificationStore.${cmd.call}(${safeJson(cmd.args ?? [])})`);
+			fn.apply(store, Array.isArray(cmd.args) ? cmd.args : []);
+		} catch (e) {
+			dlog(`dev-fire failed: ${(e as Error)?.message ?? e}`);
+		}
+	}, DEV_POLL_MS);
+}
+
+async function loadIdentity(): Promise<void> {
+	try {
+		const parsed = parseCallableJson<{ steamid64?: string }>(await identity(), {});
+		const id = parsed?.steamid64;
+		if (typeof id === 'string' && /^\d{17}$/.test(id)) me64 = id;
+		dlog(`identity: steamid64=${me64 ?? '(none)'}`);
+	} catch (e) {
+		dlog(`identity failed: ${(e as Error)?.message ?? e}`);
+	}
+}
+
 export default definePlugin(() => {
 	void loadSettings();
+	void loadIdentity();
+	void loadUrlTemplates().then((summary) => dlog(`url templates: ${summary}`));
 	installHook();
+	pollDevCommands();
 
 	return {
 		title: 'Steam Native Notify',

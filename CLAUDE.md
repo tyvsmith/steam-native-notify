@@ -4,15 +4,16 @@ A Millennium plugin that mirrors Steam's in-client notification toasts to the
 desktop notification daemon, preserving the artwork and the click action.
 
 `docs/HANDOFF.md` is the full context: verified facts, dead ends, and the current
-goal. Read it before non-trivial work. `docs/notification-types.md` is the
-generated type table.
+goal. Read it before non-trivial work. `docs/steam-routing.md` is the analysis
+of Steam's own click routing that every route cites; `docs/notification-types.md`
+is the generated type table.
 
 ## Goal
 
-Make click routing general. It currently works for four notification types via
-per-type rules built from observation; Steam has 63 types and almost certainly
-has one internal mapping that decides where any notification navigates. Find
-Steam's own logic and build on it. See "The open problem" in the handoff.
+Routing is built on Steam's own click logic, read out of the shipped UI bundle
+(28 of 62 types route; the rest are inert in Steam or open dialogs no URL
+reaches). The current goal is runtime verification of that catalog. See "The
+open problem: runtime verification" in the handoff.
 
 ## Commands
 
@@ -20,8 +21,9 @@ Steam's own logic and build on it. See "The open problem" in the handoff.
 npm run build          # generate proto types, type-check, bundle
 npm run typecheck      # tsc --noEmit on its own
 tools/test-backend     # exercise backend/main.lua with Millennium stubbed
-tools/capture          # is the running bundle current, did the feed attach,
+tools/capture          # is the running bundle current, did the hook attach,
                        # what did the last notifications carry
+tools/fire TestFriendOnline   # push a real test toast through Steam's pipeline
 tools/mep --methods    # talk to Millennium's external protocol (dev only)
 tools/notify-action --resolve-icon <url>
 npm run proto:check    # has Steam's protobuf drifted from vendor/

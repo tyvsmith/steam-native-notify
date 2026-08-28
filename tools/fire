@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Fire a test notification through Steam's own toast pipeline.
+#
+# Writes a command file the plugin's debug poll consumes (within ~3s); the
+# frontend calls the named method on Steam's NotificationStore, whose Test*
+# functions synthesize a real notification. See docs/steam-routing.md,
+# "Test harness", for what exists. Server-backed types (Wishlist, TradeOffer,
+# Comment...) cannot be fired this way: their test path is disabled in the
+# shipped client.
+#
+# Usage:
+#   tools/fire TestDownloadComplete 1073390
+#   tools/fire TestFriendOnline
+#   tools/fire TestFriendMessage null '"Ready to play?"'
+#   tools/fire TestAchievement 570
+#
+# Arguments are JSON values (bare numbers and null pass through; quote strings).
+
+set -euo pipefail
+
+PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [[ $# -lt 1 ]]; then
+  sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  exit 2
+fi
+
+call="$1"
+shift
+
+args="["
+sep=""
+for a in "$@"; do
+  args+="$sep$a"
+  sep=","
+done
+args+="]"
+
+printf '{"call":"%s","args":%s}\n' "$call" "$args" >"$PLUGIN_DIR/.dev-fire"
+echo "queued: $call $args  (picked up within ~3s while Steam runs with the plugin in debug)"

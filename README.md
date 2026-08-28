@@ -4,12 +4,14 @@ Mirrors Steam's in-client notification toasts to the desktop notification
 daemon, so they land in your notification centre with everything else.
 
 Status: **prototype under test.** Capture, artwork and delivery are verified
-against a live client. Click routing is implemented but has never been exercised,
-because the only notification type Steam gives an action to is a friend message
-and none has arrived yet.
+against a live client, and clicks for four types match Steam's own behaviour.
+Routing is built on Steam's own click logic, read out of the shipped UI bundle:
+28 of 62 notification types route, the rest are inert in Steam itself or open
+dialogs no URL can reach. `docs/steam-routing.md` is the analysis every route
+cites; most routes still await runtime verification.
 
-Steam's own toasts are currently left visible alongside these, so the two can be
-compared. Set `HIDE_STEAM_TOAST` in `frontend/index.tsx` to stop that.
+Steam's own toasts are left visible alongside these by default, so the two can
+be compared; the plugin's settings panel has the toggle that hides them.
 
 ## Why this has to be a plugin
 
@@ -62,8 +64,9 @@ backend-only change.
 ## Diagnosing
 
 ```bash
-tools/capture          # is the running bundle current, did the feed attach,
+tools/capture          # is the running bundle current, did the hook attach,
                        # and what did the last notifications carry
+tools/fire TestFriendOnline   # push a real test toast through Steam's pipeline
 tools/mep --methods    # talk to Millennium's external protocol (dev only)
 tools/notify-action --resolve-icon <url>
 npm run proto:check    # has Steam's protobuf drifted from the vendored copy
@@ -72,16 +75,13 @@ npm run proto:check    # has Steam's protobuf drifted from the vendored copy
 ## Design decisions
 
 **Mirror Steam, do not improve on it.** A click does what Steam's own toast
-does, and nothing more. Steam's download-complete toast dismisses without
-navigating, so this one does too. An earlier version sent those clicks to the
-store page, which was inventing behaviour and would have meant chasing every
-type's "right" destination forever.
-
-The signal is `response_steamurl`, which appears on exactly one message,
-`CClientNotificationFriendMessage`. Three facts agree that this is Steam
-declaring an action: it is the only route-shaped field in the whole schema, its
-message is one of only two carrying a `notificationid`, and those two are the
-only ones `OnRespondToClientNotification` could ever have acted on.
+does, and nothing more. Every route is taken from the click handler in Steam's
+shipped UI bundle -- the same chat dialog, the same library page, the same URL
+built from the same `SteamClient.URL` template table Steam's own code resolves.
+Where Steam's click opens something no URL can reach (a group chat room dialog,
+a Media item, a modal), the click here does nothing rather than something
+nearby. `docs/steam-routing.md` records the analysis, per type, with
+provenance.
 
 **No window-manager code.** Raising the Steam window on click was implemented and
 removed. It is unknown whether Steam's own toast raises the client when its

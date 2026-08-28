@@ -2,86 +2,79 @@
 
 # Notification types
 
-Every value of `EClientNotificationType`, whether Steam gives its toast a click
-action, and whether this plugin can derive one.
+Every value of `EClientNotificationType`: what Steam's own toast click does,
+and what this plugin emits for it. The actions were read out of Steam's shipped
+UI bundle; `docs/steam-routing.md` is the analysis this table summarizes,
+with the citations. "observed" rows were additionally clicked on a real client
+with a Steam window focused.
 
-Sources: the vendored `.proto`; the [Steam Client Update of 14 June 2023](https://store.steampowered.com/oldnews/195171),
-which added the clickable set; and clicks performed on a real client.
+- **28** types route.
+- **22** types are inert in Steam itself: a click only dismisses, and so does ours.
+- The remainder open dialogs no URL can reach, so their clicks stay inert here.
+- "server" types arrive from the web notification system; their payload is
+  `body_data` JSON on the toast's React object, not a client protobuf.
 
-- **1** type routes here, the only one Steam declares an action for.
-- **6** types Steam makes clickable that this cannot reach: they have no
-  payload message, so their routing lives outside this schema.
-- **20** of 62 types carry no payload message at all.
-
-| # | Type | Steam acts? | We route? | Basis |
+| # | Type | Steam's click does | We emit | Basis |
 |---|---|---|---|---|
-| 1 | `DownloadCompleted` | no | no | clicked and confirmed inert |
-| 2 | `FriendInvite` | unlikely | no | fields: steamid |
-| 3 | `FriendInGame` | unlikely | no | fields: steamid, game_name |
-| 4 | `FriendOnline` | no | no | clicked and confirmed inert |
-| 5 | `Achievement` | unlikely | no | fields: achievement_id, appid, name, description, image_url, achieved, rtime_unlocked, min_progress, current_progress, max_progress, global_achieved_pct |
-| 6 | `LowBattery` | unlikely | no | fields: pct_remaining |
-| 7 | `SystemUpdate` | unlikely | no | fields: type |
-| 8 | `FriendMessage` | yes | yes | carries `response_steamurl` |
-| 9 | `GroupChatMessage` | unlikely | no | fields: tag, steamid_sender, chat_group_id, chat_id, title, body, rawbody, icon, notificationid |
-| 10 | `FriendInviteRollup` | unlikely | no | fields: new_invite_count |
-| 12 | `FamilySharingStopPlaying` | unlikely | no | fields: accountid_owner, seconds_remaining, appid |
-| 14 | `Screenshot` | unlikely | no | fields: screenshot_handle, description, local_url |
-| 15 | `CloudSyncFailure` | unlikely | no | fields: appid |
-| 16 | `CloudSyncConflict` | unlikely | no | fields: appid |
-| 17 | `IncomingVoiceChat` | unlikely | no | fields: steamid |
-| 18 | `ClaimSteamDeckRewards` | unlikely | no | fields:  |
-| 19 | `GiftReceived` | unlikely | no | fields: sender_name |
-| 20 | `ItemAnnouncement` | unlikely | no | fields: new_item_count, new_backpack_items |
-| 21 | `HardwareSurvey` | unknown | no | no payload message |
-| 22 | `LowDiskSpace` | unlikely | no | fields: folder_index |
-| 23 | `BatteryTemperature` | unlikely | no | fields: temperature, notification_type |
-| 24 | `DockUnsupportedFirmware` | unlikely | no | fields:  |
-| 25 | `PeerContentUpload` | unlikely | no | fields: appid, peer_name |
-| 26 | `CannotReadControllerGuideButton` | unlikely | no | fields: controller_index |
-| 27 | `Comment` | yes | no | clickable per changelog, but no payload message to route from |
-| 28 | `Wishlist` | yes | no | clickable per changelog, but no payload message to route from |
-| 29 | `TradeOffer` | yes | no | clickable per changelog, but no payload message to route from |
-| 30 | `AsyncGame` | yes | no | clickable per changelog, but no payload message to route from |
-| 31 | `General` | unknown | no | no payload message |
-| 32 | `HelpRequest` | yes | no | clickable per changelog, but no payload message to route from |
-| 33 | `OverlaySplashScreen` | unlikely | no | fields:  |
-| 34 | `BroadcastAvailableToWatch` | unlikely | no | fields: broadcast_permission |
-| 35 | `TimedTrialRemaining` | unlikely | no | fields: appid, icon, offline, allowed_seconds, played_seconds |
-| 36 | `LoginRefresh` | unlikely | no | fields:  |
-| 37 | `MajorSale` | yes | no | clickable per changelog, but no payload message to route from |
-| 38 | `TimerExpired` | unlikely | no | fields:  |
-| 39 | `ModeratorMsg` | unknown | no | no payload message |
-| 40 | `SteamInputActionSetChanged` | unlikely | no | fields: controller_index, action_set_name |
-| 41 | `RemoteClientConnection` | unlikely | no | fields: machine, connected |
-| 42 | `RemoteClientStartStream` | unlikely | no | fields: machine, game_name |
-| 43 | `StreamingClientConnection` | unlikely | no | fields: hostname, machine, guest_id, connected |
-| 44 | `FamilyInvite` | unknown | no | no payload message |
-| 45 | `PlaytimeWarning` | unlikely | no | fields: type, playtime_remaining |
-| 46 | `FamilyPurchaseRequest` | unknown | no | no payload message |
-| 47 | `FamilyPurchaseRequestResponse` | unknown | no | no payload message |
-| 48 | `ParentalFeatureRequest` | unknown | no | no payload message |
-| 49 | `ParentalPlaytimeRequest` | unknown | no | no payload message |
-| 50 | `GameRecordingError` | unlikely | no | fields: game_id, error_type |
-| 51 | `ParentalFeatureResponse` | unknown | no | no payload message |
-| 52 | `ParentalPlaytimeResponse` | unknown | no | no payload message |
-| 53 | `RequestedGameAdded` | unknown | no | no payload message |
-| 54 | `ClipDownloaded` | unknown | no | no payload message |
-| 55 | `GameRecordingStart` | unlikely | no | fields: game_id |
-| 56 | `GameRecordingStop` | unlikely | no | fields: game_id, clip_id, duration_secs |
-| 57 | `GameRecordingUserMarkerAdded` | unlikely | no | fields: game_id |
-| 58 | `GameRecordingInstantClip` | unlikely | no | fields: game_id, clip_id, duration_secs |
-| 59 | `PlaytestInvite` | unknown | no | no payload message |
-| 60 | `TradeReversal` | unknown | no | no payload message |
-| 61 | `HardwareUpdateAvailable` | unlikely | no | fields: etype |
-| 62 | `ControllerLowBattery` | unlikely | no | fields: controller_type, pct_remaining |
-| 63 | `ControllerConnected` | unlikely | no | fields: controller_index |
-| 64 | `ControllerDisconnected` | unlikely | no | fields: controller_type, controller_name |
-
-## Reading this
-
-**yes** — verified from the schema or Valve's changelog.
-**no** — verified inert by clicking the real toast.
-**unlikely** — has a payload message, but nothing route-shaped in it, and Valve
-did not list it as clickable. Not individually tested.
-**unknown** — no payload message and not on Valve's list; nothing to go on.
+| 1 | `DownloadCompleted` | library page for the game | `steam://nav/games/details/<appid>` | client, bundle + observed |
+| 2 | `FriendInvite` | client no-op; arrives as server FriendInvite instead | via server type | client, bundle |
+| 3 | `FriendInGame` | chat dialog with that friend | `steam://friends/message/<steamid>` | client, bundle |
+| 4 | `FriendOnline` | chat dialog with that friend | `steam://friends/message/<steamid>` | client, bundle + observed |
+| 5 | `Achievement` | the game’s achievements page (URL store) | `steam://openurl/` + resolved `SteamIDAchievementsPage` | client, bundle |
+| 6 | `LowBattery` | dismiss only | none | client, bundle |
+| 7 | `SystemUpdate` | Settings → System | `steam://settings/system` | client, bundle |
+| 8 | `FriendMessage` | chat dialog with the sender | `steam://friends/message/<steamid>` | client, bundle + observed |
+| 9 | `GroupChatMessage` | that chat room’s dialog | none — no steam:// entry point reaches the room dialog | client, bundle |
+| 10 | `FriendInviteRollup` | pending-invites dialog | `steam://openurl/` + pending invites page | client, bundle |
+| 12 | `FamilySharingStopPlaying` | nothing | none | client, bundle |
+| 14 | `Screenshot` | that screenshot in the Media dialog | none — Media dialogs have no URL | client, bundle |
+| 15 | `CloudSyncFailure` | library page for the game | `steam://nav/games/details/<appid>` | client, bundle |
+| 16 | `CloudSyncConflict` | library page for the game | `steam://nav/games/details/<appid>` | client, bundle |
+| 17 | `IncomingVoiceChat` | chat dialog; does not accept the call | `steam://friends/message/<steamid>` | client, bundle + observed |
+| 18 | `ClaimSteamDeckRewards` | account page (renders only with a Deck) | none | client, bundle |
+| 19 | `GiftReceived` | client no-op; arrives as server Gift instead | via server type | client, bundle |
+| 20 | `ItemAnnouncement` | client no-op; arrives as server Item instead | via server type | client, bundle |
+| 21 | `HardwareSurvey` | survey modal | none | client, bundle |
+| 22 | `LowDiskSpace` | confirmation dialog, OK opens Settings → Storage | none | client, bundle |
+| 23 | `BatteryTemperature` | dismiss only | none | client, bundle |
+| 24 | `DockUnsupportedFirmware` | firmware modal | none | client, bundle |
+| 25 | `PeerContentUpload` | nothing (no component) | none | client, bundle |
+| 26 | `CannotReadControllerGuideButton` | info modal | none | client, bundle |
+| 27 | `Comment` | the commented page (server URL) | `steam://openurl/` + community + notification url | server, bundle |
+| 28 | `Wishlist` | wishlist or the app’s store page (server data) | `steam://openurl/` + wishlist/store page | server, bundle |
+| 29 | `TradeOffer` | your trade offers page | `steam://openurl/` + trade offers page | server, bundle |
+| 30 | `AsyncGame` | your game notifications page | `steam://openurl/` + game notifications page | server, bundle |
+| 31 | `General` | the link in the notification body | `steam://openurl/` + body link | server, bundle |
+| 32 | `HelpRequest` | that help ticket’s wizard page | `steam://openurl/` + ticket page | server, bundle |
+| 33 | `OverlaySplashScreen` | explicit no-op | none | client, bundle |
+| 34 | `BroadcastAvailableToWatch` | explicit no-op | none | client, bundle |
+| 35 | `TimedTrialRemaining` | explicit no-op | none | client, bundle |
+| 36 | `LoginRefresh` | explicit no-op | none | client, bundle |
+| 37 | `MajorSale` | the link in the notification body | `steam://openurl/` + body link | server, bundle |
+| 38 | `TimerExpired` | explicit no-op | none | client, bundle |
+| 39 | `ModeratorMsg` | that moderator message | `steam://openurl/` + message page | server, bundle |
+| 40 | `SteamInputActionSetChanged` | nothing | none | client, bundle |
+| 41 | `RemoteClientConnection` | nothing | none | client, bundle |
+| 42 | `RemoteClientStartStream` | nothing | none | client, bundle |
+| 43 | `StreamingClientConnection` | nothing | none | client, bundle |
+| 44 | `FamilyInvite` | family join page for that invite | `steam://openurl/` + join page | server, bundle |
+| 45 | `PlaytimeWarning` | playtime dialog | none | client, bundle |
+| 46 | `FamilyPurchaseRequest` | family management, requests tab | `steam://openurl/` + requests tab | server, bundle |
+| 47 | `FamilyPurchaseRequestResponse` | family management, requests tab | `steam://openurl/` + requests tab | server, bundle |
+| 48 | `ParentalFeatureRequest` | family management, requests tab | `steam://openurl/` + requests tab | server, bundle |
+| 49 | `ParentalPlaytimeRequest` | family management, requests tab | `steam://openurl/` + requests tab | server, bundle |
+| 50 | `GameRecordingError` | explicit no-op | none | client, bundle |
+| 51 | `ParentalFeatureResponse` | family management, requests tab | `steam://openurl/` + requests tab | server, bundle |
+| 52 | `ParentalPlaytimeResponse` | family management, requests tab | `steam://openurl/` + requests tab | server, bundle |
+| 53 | `RequestedGameAdded` | library page after a package→app lookup | none — lookup unavailable here | server, bundle |
+| 54 | `ClipDownloaded` | that clip in the Media dialog | none — Media dialogs have no URL | server, bundle |
+| 55 | `GameRecordingStart` | explicit no-op | none | client, bundle |
+| 56 | `GameRecordingStop` | that clip in the Media dialog | none — Media dialogs have no URL | client, bundle |
+| 57 | `GameRecordingUserMarkerAdded` | explicit no-op | none | client, bundle |
+| 58 | `GameRecordingInstantClip` | that clip in the Media dialog | none — Media dialogs have no URL | client, bundle |
+| 59 | `PlaytestInvite` | gated-access page for the app | `steam://openurl/` + gated-access page | server, bundle |
+| 60 | `TradeReversal` | your trade history page | `steam://openurl/` + trade history | server, bundle |
+| 61 | `HardwareUpdateAvailable` | Settings → Controller (desktop) | `steam://settings/controller` | client, bundle |
+| 62 | `ControllerLowBattery` | dismiss only | none | client, bundle |
+| 63 | `ControllerConnected` | nothing | none | client, bundle |
+| 64 | `ControllerDisconnected` | nothing | none | client, bundle |
