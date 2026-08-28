@@ -10,9 +10,15 @@ const saveSettingsRaw = callable<[{ payload: string }], string>('SaveSettings');
 export interface Settings {
 	/** Close Steam's own toast once its text has been read. */
 	hideSteamToast: boolean;
+	/**
+	 * Accept commands from tools/fire (devfire.ts). A name-and-args door into
+	 * Steam's notification stores for anything that can write the plugin
+	 * directory, so it ships off.
+	 */
+	devFire: boolean;
 }
 
-const DEFAULTS: Settings = { hideSteamToast: false };
+const DEFAULTS: Settings = { hideSteamToast: false, devFire: false };
 
 /**
  * Read by the toast handler on every notification, so the toggle takes effect

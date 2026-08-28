@@ -1,10 +1,11 @@
-import { callable, definePlugin, findModuleExport, IconsModule } from '@steambrew/client';
+import { callable, definePlugin, IconsModule } from '@steambrew/client';
 import { typeName } from './generated/notifications';
 import { clientRoute, serverRoute } from './routes';
 import { notificationFromToast, type DecodedNotification } from './notification';
 import { setIdentity } from './identity';
 import { loadUrlTemplates } from './urlstore';
 import { dlog, safeJson } from './log';
+import { startDevFirePoll } from './devfire';
 import { SettingsPanel } from './Settings';
 import { loadSettings, parseCallableJson, settings } from './settings';
 
@@ -47,7 +48,6 @@ const TOAST_PREFIX = 'notificationtoasts_';
  */
 const notify = callable<[{ payload: string }], string>('Notify');
 const identity = callable<[], string>('Identity');
-const takeDevCommand = callable<[], string>('TakeDevCommand');
 
 /**
  * The popup window exists before it has painted, so a single settle delay is a
@@ -242,108 +242,6 @@ function pluginIcon(): any {
 	return null;
 }
 
-/**
- * Dev trigger: `tools/fire` writes a command file; the backend hands it over
- * exactly once via TakeDevCommand. The command names a test method on Steam's
- * own NotificationStore (a shared-context global, `window.NotificationStore`),
- * whose Test* functions push a real synthesized notification through the full
- * toast pipeline -- the only self-service way to exercise most types.
- * Debug-only machinery; the notification path never depends on it.
- */
-const DEV_POLL_MS = 3000;
-
-/**
- * The server notification store is not a window global; it is found the way
- * lead 1 always suggested, by webpack export search. Its OnServerNotification
- * is the real ingestion path for eSource=2 notifications -- the one live
- * server events take -- so a synthetic rollup pushed through it exercises
- * capture, extraction and routing exactly as a real wishlist sale would.
- * Valve's own server-type test methods are stubbed out in the shipped build,
- * which is why this door exists.
- */
-let serverStore: any;
-
-function findServerNotificationStore(): any {
-	if (serverStore) return serverStore;
-	try {
-		serverStore = findModuleExport((e: any) => {
-			try {
-				return typeof e?.OnServerNotification === 'function' && typeof e?.MarkItemRead === 'function';
-			} catch {
-				return false;
-			}
-		});
-	} catch (e) {
-		dlog(`server store lookup failed: ${(e as Error)?.message ?? e}`);
-	}
-	return serverStore;
-}
-
-/**
- * A minimal rollup, shaped like the ones OnServerNotification receives:
- * everything the toast path reads from it is a plain property
- * (item.body_data, rgunread, timestamp), verified against the bundle.
- */
-function injectServerNotification(type: number, body: unknown): void {
-	const store = findServerNotificationStore();
-	if (!store) {
-		dlog('dev-fire: server notification store not found');
-		return;
-	}
-	const id = Date.now() % 1_000_000_000;
-	const now = Math.floor(Date.now() / 1000);
-	const rollup = {
-		type,
-		rollup_key: id,
-		item: {
-			notification_id: id,
-			// Bitfield of delivery targets; 8 is the toast bit, and
-			// BToastEnabled falls back to this when the user has no stored
-			// preference for the type. All bits set, so the fallback shows it.
-			notification_targets: 15,
-			notification_type: type,
-			body_data: JSON.stringify(body ?? {}),
-			read: false,
-			viewed: 0,
-			timestamp: now,
-		},
-		rgunread: [id],
-		rgread: [] as number[],
-		timestamp: now,
-	};
-	dlog(`dev-fire: OnServerNotification type=${type} body=${safeJson(body)}`);
-	store.OnServerNotification(rollup, 0 /* New */);
-}
-
-function pollDevCommands(): void {
-	window.setInterval(async () => {
-		try {
-			const raw = await takeDevCommand();
-			const cmd = parseCallableJson<{
-				call?: string;
-				args?: unknown[];
-				server?: { type: number; body?: unknown };
-			} | null>(raw, null);
-			if (!cmd) return;
-			if (cmd.server && typeof cmd.server.type === 'number') {
-				injectServerNotification(cmd.server.type, cmd.server.body);
-				return;
-			}
-			if (!cmd.call) return;
-			const store: any = Reflect.get(globalThis, 'NotificationStore');
-			const fn = store?.[cmd.call];
-			if (typeof fn !== 'function') {
-				dlog(`dev-fire: NotificationStore.${cmd.call} is not a function`);
-				return;
-			}
-			dlog(`dev-fire: NotificationStore.${cmd.call}(${safeJson(cmd.args ?? [])})`);
-			fn.apply(store, Array.isArray(cmd.args) ? cmd.args : []);
-		} catch (e) {
-			dlog(`dev-fire failed: ${(e as Error)?.message ?? e}`);
-		}
-	}, DEV_POLL_MS);
-}
-
 async function loadIdentity(): Promise<void> {
 	try {
 		const parsed = parseCallableJson<{ steamid64?: string }>(await identity(), {});
@@ -359,7 +257,7 @@ export default definePlugin(() => {
 	void loadIdentity();
 	void loadUrlTemplates().then((summary) => dlog(`url templates: ${summary}`));
 	installHook();
-	pollDevCommands();
+	startDevFirePoll();
 
 	return {
 		title: 'Steam Native Notify',

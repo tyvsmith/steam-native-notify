@@ -22,10 +22,14 @@ declare global {
 export function SettingsPanel() {
 	const { useState, useEffect } = window.SP_REACT;
 	const [hide, setHide] = useState(settings().hideSteamToast);
+	const [devFire, setDevFire] = useState(settings().devFire);
 
 	useEffect(() => {
 		// The panel can be opened before the stored value has been read back.
-		void loadSettings().then((s) => setHide(s.hideSteamToast));
+		void loadSettings().then((s) => {
+			setHide(s.hideSteamToast);
+			setDevFire(s.devFire);
+		});
 	}, []);
 
 	return (
@@ -41,6 +45,19 @@ export function SettingsPanel() {
 				onChange={(value: boolean) => {
 					setHide(value);
 					void updateSettings({ hideSteamToast: value });
+				}}
+			/>
+			<ToggleField
+				label="Accept test commands from tools/fire"
+				description={
+					'Developer aid: lets the tools/fire script in the plugin directory push ' +
+					'synthesized test notifications through Steam’s own pipeline. Leave off ' +
+					'unless you are working on the plugin.'
+				}
+				checked={devFire}
+				onChange={(value: boolean) => {
+					setDevFire(value);
+					void updateSettings({ devFire: value });
 				}}
 			/>
 		</DialogControlsSection>

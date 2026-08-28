@@ -36,7 +36,7 @@ fi
 if [[ $1 == --wishlist ]]; then
   appid="${2:-1073390}"
   printf '{"server":{"type":8,"body":{"appid":%s,"count":1}}}\n' "$appid" >"$PLUGIN_DIR/.dev-fire"
-  echo "queued: server Wishlist appid=$appid  (picked up within ~3s while Steam runs with the plugin in debug)"
+  echo "queued: server Wishlist appid=$appid  (needs the tools/fire toggle on in the plugin settings; picked up within ~3s)"
   exit 0
 fi
 
@@ -44,7 +44,7 @@ if [[ $1 == --server ]]; then
   type="${2:?--server needs a numeric ESteamNotificationType}"
   body="${3:-{\}}"
   printf '{"server":{"type":%s,"body":%s}}\n' "$type" "$body" >"$PLUGIN_DIR/.dev-fire"
-  echo "queued: server type=$type body=$body  (picked up within ~3s while Steam runs with the plugin in debug)"
+  echo "queued: server type=$type body=$body  (needs the tools/fire toggle on in the plugin settings; picked up within ~3s)"
   exit 0
 fi
 
@@ -60,4 +60,4 @@ done
 args+="]"
 
 printf '{"call":"%s","args":%s}\n' "$call" "$args" >"$PLUGIN_DIR/.dev-fire"
-echo "queued: $call $args  (picked up within ~3s while Steam runs with the plugin in debug)"
+echo "queued: $call $args  (needs the tools/fire toggle on in the plugin settings; picked up within ~3s)"
