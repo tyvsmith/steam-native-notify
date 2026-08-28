@@ -6,10 +6,7 @@ local logger = require("logger")
 local millennium = require("millennium")
 local json = require("json")
 
--- Notification daemons vary in how they handle a missing icon; `steam` resolves
--- through the normal icon theme lookup and degrades to no icon if absent.
 local APP_NAME = "Steam"
-local ICON = "steam"
 
 -- Resolved through the plugins directory rather than the source checkout, so the
 -- helper is found whether this is installed as a copy or a symlink.
@@ -30,18 +27,6 @@ local function shell_quote(value)
     return "'" .. escaped .. "'"
 end
 
---- The daemon on this machine (quickshell) advertises `body-markup`, so the
---- body is parsed as markup and a bare `<` or `&` from a chat message would be
---- swallowed or mangled. Only the body is parsed per the spec; the summary is
---- not, so it is passed through untouched.
-local function escape_markup(value)
-    local escaped = tostring(value)
-    escaped = escaped:gsub("&", "&amp;")
-    escaped = escaped:gsub("<", "&lt;")
-    escaped = escaped:gsub(">", "&gt;")
-    return escaped
-end
-
 --- Takes ONE argument, a JSON string. Millennium does not pass an argument
 --- object's keys through as named parameters: with two keys the values arrived
 --- in the wrong order and the notification came out with summary and body
@@ -58,33 +43,21 @@ function Notify(payload)
     end
 
     local title = (data.title ~= nil and data.title ~= "") and data.title or APP_NAME
-    local body = escape_markup(data.body or "")
+    local body = data.body or ""
     local raw_image = type(data.image) == "string" and data.image or ""
-
-    -- With a uuid the notification gets a clickable action, delivered by the
-    -- helper so that notify-send's blocking --wait never runs on this thread.
-    -- Without one there is nothing to replay, so a plain notification is honest.
-    local helper = PLUGIN_DIR .. "/tools/notify-action"
     local route = type(data.route) == "string" and data.route or ""
 
-    local command
-    if file_exists(helper) then
-        command = table.concat({
-            shell_quote(helper),
-            shell_quote(title), shell_quote(body), shell_quote(raw_image), shell_quote(route),
-            ">/dev/null 2>&1 &",
-        }, " ")
-    else
-        -- No helper: still deliver the notification, just without a click action
-        -- or resolved artwork.
-        command = table.concat({
-            "notify-send",
-            "-a", shell_quote(APP_NAME),
-            "-i", shell_quote(ICON),
-            shell_quote(title), shell_quote(body),
-            ">/dev/null 2>&1 &",
-        }, " ")
-    end
+    -- This end is a marshaller: quote and hand over. Everything the daemon
+    -- needs done to the values (markup escaping, icon resolution, the click)
+    -- happens in the helper, next to the notify-send that renders them. The
+    -- four positional arguments are a contract shared with tools/notify-action
+    -- and tools/test-backend. A missing helper was already reported loudly at
+    -- load; delivering without it would mean a second, untested notify-send.
+    local command = table.concat({
+        shell_quote(PLUGIN_DIR .. "/tools/notify-action"),
+        shell_quote(title), shell_quote(body), shell_quote(raw_image), shell_quote(route),
+        ">/dev/null 2>&1 &",
+    }, " ")
 
     os.execute(command)
     return "ok"

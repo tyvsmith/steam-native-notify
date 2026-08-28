@@ -111,11 +111,12 @@ if executed[1] then
 	check("passes the route", executed[1]:find("steam://friends/message/", 1, true) ~= nil, executed[1])
 end
 
--- Markup in the body must be escaped; the daemon parses it.
+-- The body crosses to the helper raw; markup escaping is the helper's job,
+-- done next to the notify-send that renders it (asserted further down).
 executed = {}
 pcall(Notify, '{"title":"Someone","body":"a < b & c","image":"","route":null}')
 if executed[1] then
-	check("escapes markup", executed[1]:find("&lt;", 1, true) and executed[1]:find("&amp;", 1, true), executed[1])
+	check("passes the body raw", executed[1]:find("'a < b & c'", 1, true) ~= nil, executed[1])
 end
 
 -- A shell metacharacter in the body must not escape its quoting.
@@ -182,6 +183,18 @@ check("click plan: nav route activates first", click_plan("steam://nav/games/det
 check("click plan: openurl route activates first", click_plan("steam://openurl/https://steamcommunity.com/x") == "activate+route")
 check("click plan: settings route activates first", click_plan("steam://settings/system") == "activate+route")
 check("click plan: no route does nothing", click_plan("") == "none")
+
+-- notify-action's markup escaping: the daemon parses the body as markup, so
+-- what the helper hands notify-send must have &, <, > entity-escaped.
+local function escaped_body(text)
+	local handle = io.popen(root .. "/tools/notify-action --escape-markup '" .. text .. "'")
+	local out = handle:read("*a")
+	handle:close()
+	return out
+end
+check("escape: entities", escaped_body("a < b & c") == "a &lt; b &amp; c")
+check("escape: ampersand first", escaped_body("&lt;") == "&amp;lt;")
+check("escape: clean text untouched", escaped_body("hello there") == "hello there")
 
 os.execute = real_execute
 

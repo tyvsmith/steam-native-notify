@@ -8,8 +8,14 @@
 # notification behind the last one.
 #
 # Usage: notify-action <title> <body> [image] [steam-url]
-#        notify-action --resolve-icon <url>     print the resolved icon path
-#        notify-action --click-plan <steam-url> print what a click would run
+#        notify-action --resolve-icon <url>       print the resolved icon path
+#        notify-action --click-plan <steam-url>   print what a click would run
+#        notify-action --escape-markup <text>     print the body as delivered
+#
+# <body> arrives raw; markup escaping happens here, immediately before the
+# notify-send that renders it. The four positional arguments are a contract
+# shared with backend/main.lua (which builds the invocation) and
+# tools/test-backend (which asserts it); adding a fifth costs three edits.
 
 set -u
 
@@ -31,6 +37,13 @@ title=${1:-Steam}
 body=${2:-}
 image=${3:-}
 route=${4:-}
+
+# The daemon advertises `body-markup`, so the body is parsed as markup and a
+# bare `<` or `&` from a chat message would be swallowed or mangled. Only the
+# body is parsed per the spec; the summary is passed through untouched.
+escape_markup() {
+	printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
 
 # Turn whatever the toast was showing into something notify-send can display.
 # Game art needs no fetch: Steam serves it from a virtual host whose paths map
@@ -116,7 +129,15 @@ if [ "${1:-}" = "--click-plan" ]; then
 	exit 0
 fi
 
+# Escaping is easy to get wrong silently, so it is exposed for testing like
+# the other seams: notify-action --escape-markup <text>
+if [ "${1:-}" = "--escape-markup" ]; then
+	escape_markup "${2:-}"
+	exit 0
+fi
+
 icon=$(resolve_icon "$image")
+body=$(escape_markup "$body")
 
 # Blocks here. On a click the action name is printed; on dismissal, nothing is.
 chosen=$(notify-send -a "$APP_NAME" -i "$icon" -t "$EXPIRE" \
