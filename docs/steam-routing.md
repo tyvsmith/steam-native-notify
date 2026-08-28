@@ -106,8 +106,12 @@ clickable while Steam is already focused.
 `steam://open/main` is not handled by the current client (tested: no effect).
 The window-manager-agnostic raise is the launcher-activation path: an argless
 `steam` invocation while the client runs makes it show and focus its main
-window itself (tested: focus moved to Steam). `tools/notify-action` sequences
-that before non-chat routes, on click only.
+window itself (tested: focus moved to Steam). The wrapper translates the bare
+launch into `steam -foreground` for the running instance — console_log shows
+`ExecCommandLine: ... '-foreground'` — so the mechanism is Steam's own named
+bring-to-front command. `tools/notify-action` sequences it before non-chat
+routes, on click only; a clicked test toast produced `-foreground` followed one
+second later by the route.
 
 ## Catalog: client-sourced types (`eSource=1`)
 

@@ -179,18 +179,19 @@ Partially done on 2026-08-27, against the live client:
   (`steam://settings/system`), FriendInviteRollup (pending invites URL),
   FriendInGame (delivery confirmed on the DBus Notify call). `url templates:`
   and `identity:` both load at startup.
-- **The click chain fired once for real**: the Achievement test toast was
-  clicked while its popup was up, and console_log.txt shows
-  `ExecCommandLine: steam://openurl/https://steamcommunity.com/profiles/...`
-  five seconds after delivery. The daemon does not auto-fire actions on expiry
-  (verified), so that was a genuine activation reaching the client.
+- **The openurl family is click-verified, watched**: a fired Achievement toast
+  was clicked, console_log shows `steam -foreground` then the
+  `steam://openurl/...achievements/` route one second later, and the user
+  confirmed Steam surfaced on the achievements page. The daemon does not
+  auto-fire actions on expiry (verified), so clicks are genuine.
 
 Still open:
 
-1. **Watch the client while clicking each routed type.** ExecCommandLine
-   proves the URL reached the client; that the page visibly lands where
-   Steam's own toast lands still needs eyes on the window, per the testing
-   methodology above.
+1. **Watch a click for the remaining route families.** `steam://settings/...`
+   (SystemUpdate, HardwareUpdate) and the chat-route skip (does the chat
+   dialog come up focused with the main window left alone) have not been
+   watched; `steam://nav/...` was observed before the rewrite and is
+   unchanged.
 2. **Server types need real events.** The next wishlist sale or trade offer is
    the first live `eSource=2` capture ever; the debug log dumps the whole
    rollup (`server type=... body=...`), so one event verifies the field names
