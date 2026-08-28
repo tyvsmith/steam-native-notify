@@ -6,9 +6,10 @@ Every value of `EClientNotificationType`: what Steam's own toast click does,
 and what this plugin emits for it. The actions were read out of Steam's shipped
 UI bundle; `docs/steam-routing.md` is the analysis this table summarizes,
 with the citations. "observed" rows were additionally clicked on a real client
-with a Steam window focused.
+with a Steam window focused. The routed count is derived by running the actual
+routing rules, not counted by hand.
 
-- **28** types route.
+- **31** types route.
 - **22** types are inert in Steam itself: a click only dismisses, and so does ours.
 - The remainder open dialogs no URL can reach, so their clicks stay inert here.
 - "server" types arrive from the web notification system; their payload is
@@ -17,7 +18,7 @@ with a Steam window focused.
 | # | Type | Steam's click does | We emit | Basis |
 |---|---|---|---|---|
 | 1 | `DownloadCompleted` | library page for the game | `steam://nav/games/details/<appid>` | client, bundle + observed |
-| 2 | `FriendInvite` | client no-op; arrives as server FriendInvite instead | via server type | client, bundle |
+| 2 | `FriendInvite` | client no-op; arrives as server FriendInvite instead | `steam://openurl/` + pending invites page | server, bundle |
 | 3 | `FriendInGame` | chat dialog with that friend | `steam://friends/message/<steamid>` | client, bundle |
 | 4 | `FriendOnline` | chat dialog with that friend | `steam://friends/message/<steamid>` | client, bundle + observed |
 | 5 | `Achievement` | the game’s achievements page (URL store) | `steam://openurl/` + resolved `SteamIDAchievementsPage` | client, bundle |
@@ -32,8 +33,8 @@ with a Steam window focused.
 | 16 | `CloudSyncConflict` | library page for the game | `steam://nav/games/details/<appid>` | client, bundle |
 | 17 | `IncomingVoiceChat` | chat dialog; does not accept the call | `steam://friends/message/<steamid>` | client, bundle + observed |
 | 18 | `ClaimSteamDeckRewards` | account page (renders only with a Deck) | none | client, bundle |
-| 19 | `GiftReceived` | client no-op; arrives as server Gift instead | via server type | client, bundle |
-| 20 | `ItemAnnouncement` | client no-op; arrives as server Item instead | via server type | client, bundle |
+| 19 | `GiftReceived` | client no-op; arrives as server Gift instead | `steam://openurl/` + resolved `PendingGift` | server, bundle |
+| 20 | `ItemAnnouncement` | client no-op; arrives as server Item instead | `steam://openurl/` + my inventory | server, bundle |
 | 21 | `HardwareSurvey` | survey modal | none | client, bundle |
 | 22 | `LowDiskSpace` | confirmation dialog, OK opens Settings → Storage | none | client, bundle |
 | 23 | `BatteryTemperature` | dismiss only | none | client, bundle |

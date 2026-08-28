@@ -40,6 +40,16 @@ export async function loadUrlTemplates(): Promise<string> {
 }
 
 /**
+ * Generator/test seam: replace the template table without a SteamClient.
+ * tools/gen-types-table.mjs derives its route column by calling the real
+ * routing rules, which need templates; it seeds the values recorded from a
+ * live client in docs/steam-routing.md, "The URL store".
+ */
+export function seedUrlTemplates(map: Partial<Record<UrlName, string>>): void {
+	templates = { ...map };
+}
+
+/**
  * CURLStore.ResolveURL's substitution, verbatim: `%p1%` takes the first
  * parameter and so on. Returns null when the template never arrived, so a
  * caller routes nothing rather than emitting a broken URL.

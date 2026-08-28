@@ -2,7 +2,7 @@
 
 A Millennium plugin that mirrors Steam's in-client notification toasts to the
 desktop notification daemon. Capture, artwork and delivery work. Click routing
-is now built on Steam's own logic, read out of the shipped UI bundle: 28 of 62
+is now built on Steam's own logic, read out of the shipped UI bundle: 31 of 62
 types route, the rest are inert in Steam itself or open dialogs no URL can
 reach. The open problem is runtime verification: the catalog is cited but most
 routes have not yet fired on a live client.
@@ -154,7 +154,7 @@ module references and provenance: `docs/steam-routing.md`. The short version:
   primary split is client-handled vs server-webbed, then by activate primitive.
 
 Routing now implements that catalog (`frontend/routes.ts`), with each rule
-citing its row in `docs/steam-routing.md`. 28 of 62 types route; the rest are
+citing its row in `docs/steam-routing.md`. 31 of 62 types route; the rest are
 inert in Steam or open dialogs no URL reaches (group chat rooms, Media items,
 modals).
 

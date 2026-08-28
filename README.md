@@ -6,7 +6,7 @@ daemon, so they land in your notification centre with everything else.
 Status: **prototype under test.** Capture, artwork and delivery are verified
 against a live client, and clicks for four types match Steam's own behaviour.
 Routing is built on Steam's own click logic, read out of the shipped UI bundle:
-28 of 62 notification types route, the rest are inert in Steam itself or open
+31 of 62 notification types route, the rest are inert in Steam itself or open
 dialogs no URL can reach. `docs/steam-routing.md` is the analysis every route
 cites; most routes still await runtime verification.
 

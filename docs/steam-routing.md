@@ -164,6 +164,11 @@ map in module 11374, each producing an https URL from `item.body_data` (JSON)
 and navigating with `SteamWeb`. Clicking also marks the item read
 (`Xe` → `MarkItemRead`), which this plugin does not replicate.
 
+Type numbers follow the published `ESteamNotificationType`
+(SteamTracking, `steammessages_notifications.steamclient.proto`); note
+`SendToPhone = 23` sits between ClipDownloaded's neighbours, so
+ClipDownloaded is 24.
+
 | server type | Steam's URL (source) | body fields used |
 |---|---|---|
 | 2 Gift | `ResolveURL("PendingGift")` (`pr[K]`) | — |
@@ -179,7 +184,7 @@ and navigating with `SteamWeb`. Clicking also marks the item read
 | 14 ModeratorMsg | community + `my/moderatormessages/<msgid>` (registry `v`) | `msgid` |
 | 15–21 family/parental | store + `account/familymanagement?tab=requests` (registry `x`); FamilyInvite: store + `account/familymanagement/join?invitation=<familyid>` | `familyid` |
 | 22 RequestedGameAdded | `nav.App()` after a package→app lookup (`qt`) | none we can reach — not routed |
-| 23 ClipDownloaded | `nav.Media.Clip({clip_id})` (`nr`) | not routed (no URL) |
+| 24 ClipDownloaded | `nav.Media.Clip({clip_id})` (`nr`) | not routed (no URL) |
 | 28 PlaytestInvite | store + `account/gatedaccess?appid=<appid>` (registry `v`) | `appid` |
 | 29 TradeReversal | community + `my/tradehistory` (`Vt`) | — |
 

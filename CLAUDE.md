@@ -11,7 +11,7 @@ is the generated type table.
 ## Goal
 
 Routing is built on Steam's own click logic, read out of the shipped UI bundle
-(28 of 62 types route; the rest are inert in Steam or open dialogs no URL
+(31 of 62 types route; the rest are inert in Steam or open dialogs no URL
 reaches). The current goal is runtime verification of that catalog. See "The
 open problem: runtime verification" in the handoff.
 
