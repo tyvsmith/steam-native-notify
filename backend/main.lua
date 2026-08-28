@@ -11,36 +11,16 @@ local json = require("json")
 local APP_NAME = "Steam"
 local ICON = "steam"
 
---- Steam serves toast artwork from `steamloopback.host`, a virtual host only the
---- client can resolve. The path maps one-to-one onto the on-disk library cache,
---- so the capsule is already local and nothing has to be downloaded.
 -- Resolved through the plugins directory rather than the source checkout, so the
 -- helper is found whether this is installed as a copy or a symlink.
 local PLUGIN_DIR = (os.getenv("HOME") or "")
     .. "/.local/share/millennium/plugins/steam-native-notify"
-
-local LIBRARY_CACHE = (os.getenv("HOME") or "") .. "/.local/share/Steam/appcache/librarycache/"
 
 local function file_exists(path)
     local handle = io.open(path, "r")
     if not handle then return false end
     handle:close()
     return true
-end
-
---- steamloopback.host/assets/<appid>/<file>?c=... -> librarycache/<appid>/<file>
---- Returns nil for anything that does not resolve, so the caller falls back to
---- the themed Steam icon rather than handing notify-send a broken path.
-local function local_asset(url)
-    if type(url) ~= "string" then return nil end
-
-    local appid, file = url:match("steamloopback%.host/assets/([^/]+)/([^?]+)")
-    if not appid or not file then return nil end
-
-    local path = LIBRARY_CACHE .. appid .. "/" .. file
-    if not file_exists(path) then return nil end
-
-    return path
 end
 
 --- POSIX single-quote escaping: end the quote, add an escaped quote, reopen.
@@ -79,31 +59,28 @@ function Notify(payload)
 
     local title = (data.title ~= nil and data.title ~= "") and data.title or APP_NAME
     local body = escape_markup(data.body or "")
-    -- Resolved here only for the no-helper fallback; when the helper runs it
-              -- does its own resolution, because a CDN avatar needs fetching.
-    local icon = local_asset(data.image) or ICON
     local raw_image = type(data.image) == "string" and data.image or ""
 
     -- With a uuid the notification gets a clickable action, delivered by the
     -- helper so that notify-send's blocking --wait never runs on this thread.
     -- Without one there is nothing to replay, so a plain notification is honest.
     local helper = PLUGIN_DIR .. "/tools/notify-action"
-    local uuid = data.uuid
     local route = type(data.route) == "string" and data.route or ""
 
     local command
-    if type(uuid) == "string" and uuid ~= "" and file_exists(helper) then
+    if file_exists(helper) then
         command = table.concat({
             shell_quote(helper),
-            shell_quote(uuid), shell_quote(title), shell_quote(body), shell_quote(raw_image),
-            shell_quote(route),
+            shell_quote(title), shell_quote(body), shell_quote(raw_image), shell_quote(route),
             ">/dev/null 2>&1 &",
         }, " ")
     else
+        -- No helper: still deliver the notification, just without a click action
+        -- or resolved artwork.
         command = table.concat({
             "notify-send",
             "-a", shell_quote(APP_NAME),
-            "-i", shell_quote(icon),
+            "-i", shell_quote(ICON),
             shell_quote(title), shell_quote(body),
             ">/dev/null 2>&1 &",
         }, " ")
@@ -115,61 +92,42 @@ end
 
 --- Called from the frontend via callable('Log'), so toast extraction can be
 --- traced from Millennium's log without a devtools session attached.
+--- Settings are stored by Millennium, which persists them in config.json and
+--- keeps them across updates. The frontend holds the live copy; this end only
+--- reads and writes.
+local SETTING_HIDE = "hideSteamToast"
+
+function LoadSettings()
+    local stored = millennium.config.get(SETTING_HIDE)
+    return json.encode({ hideSteamToast = stored == true })
+end
+
+function SaveSettings(payload)
+    local ok, data = pcall(json.decode, tostring(payload or "{}"))
+    if not ok or type(data) ~= "table" then
+        logger:error("[steam-native-notify] undecodable settings: " .. tostring(payload))
+        return "error"
+    end
+
+    millennium.config.set(SETTING_HIDE, data.hideSteamToast == true)
+    logger:info("[steam-native-notify] hideSteamToast = " .. tostring(data.hideSteamToast == true))
+    return "ok"
+end
+
 function Log(line)
     logger:info("[steam-native-notify] " .. tostring(line or ""))
     return "ok"
 end
 
---- Millennium's Lua config hook fires for changes "from frontend, MEP, or other
---- sources", which is what makes the click bridge work: tools/notify-action
---- writes the clicked uuid over MEP from outside Steam, and this is where it
---- lands. The frontend is then driven from here rather than subscribing itself.
-local function install_click_bridge()
-    millennium.config.on_change("replay", function(_, value)
-        if type(value) ~= "string" or value == "" then return end
-        logger:info("[steam-native-notify] click bridge: replay " .. value)
-        millennium.call_frontend_method("onReplay", { value })
-        millennium.config.delete("replay")
-    end)
-
-    millennium.config.on_change("selftest", function(_, value)
-        if not value then return end
-        logger:info("[steam-native-notify] click bridge: selftest")
-        millennium.call_frontend_method("onSelfTest", {})
-        millennium.config.delete("selftest")
-    end)
-
-    logger:info("[steam-native-notify] backend click bridge installed")
-end
-
-local PENDING_DIR = (os.getenv("XDG_CACHE_HOME") or ((os.getenv("HOME") or "") .. "/.cache"))
-    .. "/steam-native-notify/pending"
-
---- Hand the frontend one clicked notification, oldest first, and forget it.
---- Returns "" when there is nothing waiting.
----
---- Polled rather than pushed because Millennium delivers external config changes
---- by evaluating JS in the main IPC context, and a plugin frontend lives in its
---- own isolated world. A file is visible from everywhere.
-function TakePending()
-    local pipe = io.popen("ls -1tr " .. shell_quote(PENDING_DIR) .. " 2>/dev/null")
-    if not pipe then return "" end
-
-    local name = pipe:read("l")
-    pipe:close()
-    if not name or name == "" then return "" end
-
-    os.remove(PENDING_DIR .. "/" .. name)
-    logger:info("[steam-native-notify] click bridge: " .. name)
-    return name
-end
-
 local function on_load()
     logger:info("[steam-native-notify] backend loaded")
 
-    local ok, err = pcall(install_click_bridge)
-    if not ok then
-        logger:error("[steam-native-notify] click bridge failed: " .. tostring(err))
+    local helper = PLUGIN_DIR .. "/tools/notify-action"
+    if file_exists(helper) then
+        logger:info("[steam-native-notify] helper: " .. helper)
+    else
+        logger:error("[steam-native-notify] helper MISSING at " .. helper
+            .. " -- notifications will have no artwork or click action")
     end
 
     millennium.ready()

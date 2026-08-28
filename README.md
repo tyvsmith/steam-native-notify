@@ -3,268 +3,157 @@
 Mirrors Steam's in-client notification toasts to the desktop notification
 daemon, so they land in your notification centre with everything else.
 
-Status: **prototype**. Text extraction, image resolution, and the click bridge
-are verified working against a live Steam. The action replay is built but has
-never run, because Steam's notification feed has not yet been observed firing.
+Status: **prototype under test.** Capture, artwork and delivery are verified
+against a live client. Click routing is implemented but has never been exercised,
+because the only notification type Steam gives an action to is a friend message
+and none has arrived yet.
+
+Steam's own toasts are currently left visible alongside these, so the two can be
+compared. Set `HIDE_STEAM_TOAST` in `frontend/index.tsx` to stop that.
 
 ## Why this has to be a plugin
 
 Steam draws every notification as its own top-level XWayland window titled
 `notificationtoasts_<N>_desktop`. That title is the only text outside the
-process — the message a person reads is rendered inside CEF. A compositor rule
-can move, hide, or float that window, but it cannot read it.
+process; the message a person reads is rendered inside CEF. A compositor rule can
+move, hide, or float that window, but it cannot read it.
 
 Nothing else on the system can either, which was checked rather than assumed:
 
-- **AT-SPI** — Steam publishes no accessibility tree. Chromium only builds one
-  when asked via `--force-renderer-accessibility`, and Steam exposes no way to
-  pass it.
-- **Steam's logs** — every `notification` string in `~/.steam/steam/logs/` is
-  `OnAppLifetimeNotification`, a game session event. Toast text is never logged.
-
-So the reader has to run where the DOM is. Two places qualify: inside Steam's JS
-context (this plugin), or attached to Steam's CEF debugger over CDP. This is the
-first.
+- **AT-SPI** publishes nothing for Steam. Chromium only builds an accessibility
+  tree when asked via `--force-renderer-accessibility`, and Steam exposes no way
+  to pass it.
+- **Steam's logs** never contain toast text. Every `notification` string in
+  `~/.steam/steam/logs/` is `OnAppLifetimeNotification`, a game session event.
 
 ## How it works
 
 ```
-g_PopupManager
-  └─ AddPopupCreatedCallback
-       └─ popup.window.name starts with "notificationtoasts_"
-            └─ poll document.body.innerText until it paints
-                 └─ callable('Notify') → backend/main.lua → notify-send
+Steam event
+   |  SteamClient.Notifications.RegisterForNotifications
+   |    index, type, protobuf body -> decode -> steam:// route (or none)
+   |  ~400ms later
+Toast window (notificationtoasts_<N>_desktop)
+   |    innerText -> title / body,  <img>.src -> artwork
+   |    N matches the feed index; that is the correlation key
+   |  callable('Notify') with one JSON argument
+backend/main.lua
+   |  spawns tools/notify-action, detached
+        |  resolves the icon (library cache, or fetch and cache from the CDN)
+        |  notify-send -A default=Open -t 0
+        |  on click: steam <route>
 ```
 
-`g_PopupManager` is not public API. It is what
-[kitsune-notifications](https://github.com/K1tsune12/kitsune-notifications) uses
-to find the same windows in order to reposition them, which is the only reason
-to rely on it. If Valve renames it the hook retries for 30 seconds and then goes
-quiet — no exceptions thrown into Steam's UI.
+Four pieces: `frontend/index.tsx` captures and decodes, `backend/main.lua`
+escapes and spawns, `tools/notify-action` delivers and acts, and `tools/capture`
+reports what happened.
 
-The frontend polls for painted text rather than waiting a fixed delay, so a slow
-frame delays a notification instead of dropping it.
-
-## Build
+## Build and install
 
 ```bash
 npm install
-npm run build     # writes .millennium/Dist/index.js
+npm run build     # regenerates proto types, then bundles to .millennium/Dist
+ln -s "$PWD" ~/.local/share/millennium/plugins/steam-native-notify
 ```
 
-`pnpm` works too if you have it; the scripts only shell out to `millennium-ttc`.
+Restart Steam, then enable **Steam Native Notify** under Millennium > Plugins.
 
-## Install
+A **full Steam restart is required for any frontend change**. `plugin.restart`
+and disable/enable both reload the backend but leave the frontend loaded and not
+executing. `tools/mep plugin.restart name=steam-native-notify` is enough for a
+backend-only change.
 
-Millennium loads plugins from `~/.local/share/millennium/plugins/`. Build first —
-the compiled bundle is what gets loaded, not the TypeScript.
+## Diagnosing
 
 ```bash
-npm run build
-ln -s ~/Code/steam-native-notify ~/.local/share/millennium/plugins/steam-native-notify
+tools/capture          # is the running bundle current, did the feed attach,
+                       # and what did the last notifications carry
+tools/mep --methods    # talk to Millennium's external protocol (dev only)
+tools/notify-action --resolve-icon <url>
+npm run proto:check    # has Steam's protobuf drifted from the vendored copy
 ```
 
-If Millennium does not pick up the symlink, copy the directory instead. It needs
-`plugin.json`, `backend/`, and `.millennium/`; `frontend/` and `node_modules/`
-are build-time only.
+## Design decisions
 
-Then restart Steam and enable **Steam Native Notify** under Millennium →
-Plugins.
+**Mirror Steam, do not improve on it.** A click does what Steam's own toast
+does, and nothing more. Steam's download-complete toast dismisses without
+navigating, so this one does too. An earlier version sent those clicks to the
+store page, which was inventing behaviour and would have meant chasing every
+type's "right" destination forever.
 
-## Verify
+The signal is `response_steamurl`, which appears on exactly one message,
+`CClientNotificationFriendMessage`. Three facts agree that this is Steam
+declaring an action: it is the only route-shaped field in the whole schema, its
+message is one of only two carrying a `notificationid`, and those two are the
+only ones `OnRespondToClientNotification` could ever have acted on.
 
-Trigger a notification without waiting for a friend — start or finish any
-download, or have someone message you. A native notification should appear
-alongside Steam's own toast.
+**No window-manager code.** Raising the Steam window on click was implemented and
+removed. It is unknown whether Steam's own toast raises the client when its
+action fires, and a route that opens a window gets focus from the window manager
+anyway. The project now depends on nothing beyond `notify-send`, `curl` and
+`steam`.
 
-The prototype logs every toast it sees. Watch Millennium's log for
-`[steam-native-notify]` lines to confirm what text was extracted and how it was
-split into title and body.
+**Protobuf types are generated, not written.** `vendor/` holds Steam's published
+`.proto`; `tools/gen-proto.mjs` turns it into `frontend/generated/`. Hand-writing
+the enum drifted six values behind, and matching fields by position read the
+wrong field for two messages. `npm run proto:check` reports upstream drift rather
+than letting it pass silently. The npm package that ships these definitions has
+two downloads a week and distributes generated JavaScript, which is a poor trade
+for a 9KB file that can be read in full.
 
-## Once it works: stop the double-reporting
+**The backend takes one JSON argument.** Millennium does not map an argument
+object's keys onto Lua parameter names; two keys arrived in the wrong order and
+produced a notification with its summary and body swapped, silently.
 
-Both notifications fire until Steam's own toast is suppressed. It cannot simply
-be turned off — Steam's notification settings suppress the *event*, and then
-there is nothing left to read.
+## Verified against a live client
 
-The trick is that this plugin reads the DOM, not the screen, so the toast can be
-banished somewhere it is never composited and still be read in full. In
-`~/Code/dotfiles/dot_config/hypr/apps.lua`, replace the `steam_toasts` entry:
+- Toasts are windows titled `notificationtoasts_<N>_desktop`, and the feed's
+  index matches that counter.
+- Persistent Steam windows arrive titled; transient popups arrive untitled.
+- `g_PopupManager.AddPopupCreatedCallback` fires for every popup.
+- The feed works inside a plugin's isolated CDP world, and its payload is real
+  protobuf: a DownloadCompleted decoded to `{appid: 1073390, dlc_appid: 0}`.
+- Toast artwork resolves without downloading:
+  `steamloopback.host/assets/<appid>/<file>` maps to
+  `~/.local/share/Steam/appcache/librarycache/<appid>/<file>`. Friend avatars are
+  public CDN URLs and are fetched once, then cached.
+- Notification actions must be named `default` to fire on a body click, and only
+  while the popup is live. An expired popup becomes a "restored row" with no live
+  actions, hence `-t 0`.
+- `OnRespondToClientNotification` ignored every notification passed to it. Only
+  2 of 45 messages carry a `notificationid`, so there is usually no id to give it.
+- A callable's return value arrives JSON-encoded, so a Lua string comes back
+  wrapped in literal quote characters.
+- **A Steam toast is only clickable while a Steam window has focus.** Unfocused,
+  it takes no click at all: no cursor change, no highlight. Every earlier reading
+  of "Steam's toast does nothing" was taken unfocused and was therefore wrong,
+  including for downloads and friend-online. Test clicks with the client in
+  focus or the result means nothing.
+- With focus, the observed behaviour is: FriendMessage, FriendOnline and
+  IncomingVoiceChat all open the chat with that person; DownloadCompleted
+  switches the library to that game. A voice request opens the chat rather than
+  accepting the call.
+- `response_steamurl` is declared on CClientNotificationFriendMessage and
+  arrives empty. It is the only route-shaped field in the schema, which made it
+  look authoritative; routing has to come from `steamid` instead.
+- The notification feed does not deliver every notification. An incoming voice
+  chat renders as `notificationtoasts_10000_desktop` and produces no feed event,
+  so extraction reads Steam's notification object out of the React tree, where
+  `data` is already a decoded protobuf wrapper.
 
-```lua
-{
-  id        = "steam_toasts",
-  match     = { class = "^steam$", title = "^notificationtoasts_\\d+_desktop$" },
-  workspace = "special:hidden",
-  silent    = true,
-  rules     = { no_focus = true, no_initial_focus = true },
-},
-```
+## Known gaps
 
-Same hidden workspace the HELLDIVERS GameGuard window already uses. Do this
-**after** native notifications are confirmed working, not before — until then it
-only makes notifications invisible.
-
-## What to test
-
-Work down this list; each step only makes sense if the one above it passed.
-
-1. **It fires at all.** Trigger any notification — start or finish a download,
-   or have someone message you. Expect a native notification alongside Steam's
-   own toast. If nothing appears, check Millennium's log for
-   `[steam-native-notify] hook installed`; its absence means `g_PopupManager`
-   was never found.
-
-2. **The title/body split is right, per notification type.** This is the one
-   real guess in the plugin, and different toasts have different shapes. Cover
-   at least: a chat message, a friend coming online (needs
-   `Notifications_ShowOnline` turned back on in Steam's settings — it is
-   currently off), a download completing, and an event or announcement. The
-   probe logs the extracted text next to the split it chose.
-
-3. **Markup and punctuation survive.** Have someone send a message containing
-   `<`, `>`, or `&`. The daemon here parses the body as markup, so these are
-   escaped before sending; the test is that they arrive looking like what was
-   typed rather than vanishing.
-
-4. **No duplicates, nothing dropped.** Two notifications in quick succession
-   should produce exactly two natives. A very fast one should not be lost —
-   the reader polls for up to ~1.2s for the toast to paint.
-
-5. **Lifecycle.** Disable and re-enable the plugin from Millennium; restart
-   Steam; leave Steam closed for a while. Nothing should error, and the hook
-   should reinstall on the next start.
-
-6. **The probe output.** One good capture answers both open features below.
-   Look for `probe <name> images=`, `links=`, and `backgrounds=` lines in the
-   log. Paste one over and the click action and image work can be designed
-   against real data instead of guesses.
-
-## Not yet preserved
-
-Two things Steam's own toast does that this does not, both by omission rather
-than by choice.
-
-### Click action
-
-Steam's toast is clickable and opens the relevant thing — the chat, the
-downloads page, the event. This bridge produces a notification that does
-nothing when clicked.
-
-The obvious fix does not work. Replaying the click on the toast's DOM element
-would run Steam's own handler exactly, but Steam destroys the popup roughly five
-seconds after it appears, and the notification daemon here advertises
-`persistence` — the native notification is designed to outlive that. By the time
-anyone clicks, the DOM and its handler are gone.
-
-What can work is extracting the *intent* while the toast is still alive and
-turning it into a `steam://` route that survives independently:
-
-```
-chat message      -> steam://friends/message/<steamid>
-download finished -> steam://open/downloads
-event             -> steam://url/...
-```
-
-The delivery side is already available: `notify-send -A default=Open` prints the
-action name to stdout when clicked, and the daemon advertises `actions`. Because
-`-A` implies `--wait`, it must not be run from the Lua backend directly — that
-would tie the backend up for the notification's lifetime. A detached one-liner
-handles it without any callback into Steam:
-
-```sh
-sh -c 'a=$(notify-send -A default=Open ...); [ "$a" = default ] && steam "<url>"' &
-```
-
-Step 6 of the test list decides whether the route is recoverable at all — that
-is what the `links=` probe is looking for.
-
-### Image
-
-Steam shows the sender's avatar or the game's capsule art. `innerText` drops
-images by definition, so nothing is carried over.
-
-The route is to read the URL from the DOM — `<img>.src`, or a computed
-`background-image`, which is what the `images=` and `backgrounds=` probes
-collect — download it to a cache directory, and pass the local path as
-`notify-send -i <path>`. Steam's avatar and capsule URLs are public CDN
-addresses, so no authentication is involved.
-
-The daemon here advertises `icon-static` but not `image-data` or `image-path`,
-so `-i` with a file path is the route rather than the image hints. The Lua
-backend already has an `http` module, but whether it handles binary responses
-cleanly is unverified; `curl` through `os.execute` is the fallback.
-
-## Verified on a live client
-
-Facts established by testing rather than reading, each of which cost a cycle to
-find:
-
-- **The click bridge works.** A click on a desktop notification reaches the
-  running plugin. The transport is a file under
-  `~/.cache/steam-native-notify/pending/`, polled by the frontend through a
-  backend callable.
-- **Config change notifications do not reach a plugin frontend.** Millennium
-  delivers an external config write by evaluating JavaScript in the main IPC
-  context, but a plugin frontend runs in its own isolated CDP world
-  (`Created isolated CDP world for plugin ... (ctx N)`), so the listener is never
-  called. The Lua `config.on_change` hook did not fire for an MEP write either.
-  This is why the bridge uses a file.
-- **A callable's return value arrives JSON-encoded.** A Lua string comes back
-  wrapped in literal quote characters, so `token === 'selftest'` silently fails.
-  Symptom: a reserved token treated as an unknown uuid.
-- **Millennium maps callable arguments positionally, not by name.** Sending
-  `{ title, body }` to `Notify(title, body)` delivered them in the wrong order
-  and produced a notification with summary and body swapped. One JSON-string
-  argument avoids it.
-- **A frontend change needs a full Steam restart.** `plugin.restart` (with or
-  without `reload_ui`) and disable/enable both leave the frontend loaded but not
-  executing -- the log says "Delegating frontend load" and nothing runs. Only
-  `steam -shutdown` and relaunch works. The backend reloads fine either way.
-- **`can replay` is timing-dependent.** `OnRespondToClientNotification` was
-  present when the plugin loaded into an already-running Steam, and absent when
-  the plugin loaded during Steam's startup. It should be checked when a replay is
-  attempted, not at install time.
-- **`DisplayClientNotification` does not feed `RegisterForNotifications`.**
-  Dispatching one produces no feed event, so it cannot stand in for a real
-  notification when testing.
-- **Toast artwork is already on disk.** `steamloopback.host/assets/<appid>/<file>`
-  maps to `~/.local/share/Steam/appcache/librarycache/<appid>/<file>`; nothing
-  needs downloading.
-- **Notification actions die with the popup.** Omarchy's shell only invokes an
-  action whose identifier is `default`, and only while the popup is live -- an
-  expired popup becomes a "restored row" with no live actions, and clicking it
-  can only dismiss or focus the sending app.
-
-## Still unproven
-
-The notification feed has never been seen firing. `RegisterForNotifications`
-registers without error, but no `notif index=` line has appeared for any real
-notification. Until one does, two things are unknown: whether the feed delivers
-at all in a plugin's isolated world, and whether the index it hands over is the
-id `OnRespondToClientNotification` accepts.
-
-Trigger a real notification -- a download completing, or a friend coming online
--- and check `tools/capture`.
-
-## Known unknowns
-
-- **Text shape.** `document.body.innerText` returns whatever Steam renders. The
-  first-line-is-title split is a guess that needs a real toast to confirm; the
-  logging exists to settle it.
-- **The 64-bit client.** Millennium hooks Steam by preloading into the 32-bit
-  binary via `ubuntu12_32/libXtst.so.6`. On the SteamRT3 64-bit client it
-  installs, reports success, and does nothing —
-  [Millennium #840](https://github.com/SteamClientHomebrew/Millennium/issues/840),
-  open. When that lands, this plugin dies with it and the CDP route is the
-  successor.
-- **Steam updates.** Millennium breaks on client updates and is fixed within
-  days. Riding `publicbeta` means riding that cycle.
-
-## Uninstall
-
-```bash
-rm ~/.local/share/millennium/plugins/steam-native-notify
-```
-
-Restart Steam. Revert the `apps.lua` change if it was applied.
+- **Friend messages are unobserved.** The one type with an action, and the only
+  path `response_steamurl` exercises. Everything about click behaviour rests on
+  it.
+- **Six clickable types are out of reach.** Valve's June 2023 client update made
+  Wishlist, Trade Offer, Steam Turn, Help Request, Major Sale and Comment toasts
+  clickable. None of them has a protobuf message, so no route can be derived from
+  the feed. Their routing lives outside this schema.
+- **In-game is untested.** Whether toasts are capturable while a game has focus
+  is unknown.
+- **Unclicked notifications never expire.** `-t 0` leaves one `notify-send`
+  process alive per notification until it is dismissed.
+- Millennium's hook preloads into the 32-bit Steam client. On the SteamRT3
+  64-bit client it installs, reports success, and does nothing
+  ([Millennium #840](https://github.com/SteamClientHomebrew/Millennium/issues/840)).

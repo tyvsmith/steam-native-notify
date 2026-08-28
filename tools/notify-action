@@ -1,235 +1,112 @@
-#!/usr/bin/env python3
-"""Show a notification whose click is handed back to the plugin inside Steam.
+#!/bin/sh
+# Deliver one Steam notification to the desktop, and act on a click.
+#
+# Spawned detached by backend/main.lua, one per notification. It exists as its
+# own process because `notify-send --action` implies `--wait`: it blocks until
+# the notification is dismissed or clicked, which would otherwise tie up the
+# plugin backend for the notification's lifetime and serialise every
+# notification behind the last one.
+#
+# Usage: notify-action <title> <body> [image] [steam-url]
+#        notify-action --resolve-icon <url>     print the resolved icon path
 
-This is the outbound half of the bridge. The plugin's Lua backend spawns one of
-these per notification, detached; it lives only as long as the notification does.
+set -u
 
-Why a separate process: `notify-send --action` implies `--wait`, so it blocks
-until the notification is closed or clicked. Running that in the Lua backend
-would tie the backend up for the notification's lifetime and serialise every
-notification behind the previous one.
+APP_NAME="Steam"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/steam-native-notify/icons"
+LIBRARY_CACHE="$HOME/.local/share/Steam/appcache/librarycache"
 
-The click travels back through Millennium's external protocol (MEP), a unix
-socket that any local process can speak: 4-byte little-endian length prefix,
-msgpack body. Writing a plugin config key from outside pushes the change to the
-plugin, where the frontend replays Steam's own action for that notification. No
-`steam://` handler is involved -- Millennium exposes no plugin URL scheme.
+# The Desktop Notifications spec reserves "default" for the action a plain body
+# click invokes. Any other name only fires from a button the daemon may or may
+# not draw.
+ACTION="default"
 
-Usage:
-  notify-action <uuid> <title> <body> [icon] [steam-url]
-  notify-action --self-test          verify the MEP hop without a notification
-"""
-
-import os
-import socket
-import struct
-import subprocess
-import sys
-
-import hashlib
-import urllib.request
-
-import msgpack
-
-MEP_SOCKET = "/tmp/millennium-mep.sock"
-PLUGIN_NAME = "steam-native-notify"
-REPLAY_KEY = "replay"
-# The Desktop Notifications spec reserves the key "default" for the action a
-# plain body click invokes, and says it should not be drawn as a button. Any
-# other key only fires from a button the daemon may or may not render. Named
-# "open", a body click fell through to the daemon's own fallback -- which, under
-# quickshell, merely focuses the sending app.
-ACTION_ID = "default"
-APP_NAME = "Steam"
-
-# Replaying the action tells Steam what to do, but not to come forward -- and a
-# notification you click should take you to the app. Omarchy's own shell focuses
-# the sending app as its fallback using this helper, so reuse it and fall back to
-# a plain hyprctl match anywhere it is absent.
-FOCUS_HELPERS = [
-    ["omarchy-hyprland-focus-app", "steam"],
-    ["hyprctl", "dispatch", "focuswindow", "class:^(steam)$"],
-]
-
-# Actions only survive while the popup is live. Omarchy's shell drops a expired
+# Actions only survive while the popup is live. Omarchy's shell drops an expired
 # popup into history as a "restored row" with no live actions, after which a
-# click can only dismiss or focus the sending app -- the action is gone. 0 means
-# the popup waits for the user rather than expiring, which is the only way a
-# click is guaranteed to reach us. The cost is one helper process per unclicked
-# notification, so this wants revisiting before the bridge ships.
-EXPIRE_MS = 0
+# click can only dismiss. 0 means it waits for the user instead of expiring.
+EXPIRE=0
 
+title=${1:-Steam}
+body=${2:-}
+image=${3:-}
+route=${4:-}
 
-def mep_call(method, params, timeout=4.0):
-    """One request, one response. Returns the decoded reply or raises."""
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    try:
-        sock.connect(MEP_SOCKET)
-        body = msgpack.packb({"id": "notify-action", "method": method, "params": params},
-                             use_bin_type=True)
-        sock.sendall(struct.pack("<I", len(body)) + body)
+# Turn whatever the toast was showing into something notify-send can display.
+# Game art needs no fetch: Steam serves it from a virtual host whose paths map
+# one-to-one onto the on-disk library cache. A friend's avatar is on the public
+# CDN and has to be pulled once, then cached.
+resolve_icon() {
+	raw=$1
+	[ -n "$raw" ] || { echo steam; return; }
 
-        header = sock.recv(4)
-        if len(header) < 4:
-            raise IOError("short MEP header")
-        (length,) = struct.unpack("<I", header)
+	case $raw in
+	/*)
+		[ -f "$raw" ] && echo "$raw" || echo steam
+		return
+		;;
+	*steamloopback.host/assets/*)
+		tail=${raw#*steamloopback.host/assets/}
+		tail=${tail%%\?*}
+		[ -f "$LIBRARY_CACHE/$tail" ] && echo "$LIBRARY_CACHE/$tail" || echo steam
+		return
+		;;
+	http://* | https://*) ;;
+	*)
+		echo steam
+		return
+		;;
+	esac
 
-        buf = b""
-        while len(buf) < length:
-            chunk = sock.recv(length - len(buf))
-            if not chunk:
-                raise IOError("MEP connection closed mid-frame")
-            buf += chunk
-        return msgpack.unpackb(buf, raw=False)
-    finally:
-        sock.close()
+	stem=${raw%%\?*}
+	ext=${stem##*.}
+	case $ext in
+	jpg | jpeg | png | gif | webp) ext=".$ext" ;;
+	*) ext=".img" ;;
+	esac
 
+	key=$(printf '%s' "$stem" | sha1sum | cut -d' ' -f1)
+	cached="$CACHE/$key$ext"
 
-ICON_CACHE = os.path.join(
-    os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
-    "steam-native-notify", "icons")
+	if [ -s "$cached" ]; then
+		echo "$cached"
+		return
+	fi
 
-LIBRARY_CACHE = os.path.expanduser("~/.local/share/Steam/appcache/librarycache")
+	mkdir -p "$CACHE" 2>/dev/null || { echo steam; return; }
+	# Download to a temp name and rename, so an interrupted fetch cannot leave a
+	# truncated icon cached forever.
+	if curl -fsSL --max-time 5 -o "$cached.part" "$raw" 2>/dev/null && [ -s "$cached.part" ]; then
+		mv -f "$cached.part" "$cached"
+		echo "$cached"
+	else
+		rm -f "$cached.part" 2>/dev/null
+		echo steam
+	fi
+}
 
-ICON_FETCH_TIMEOUT = 5
+# Resolution is the fiddliest part and the easiest to get wrong silently, so it
+# is exposed for testing: notify-action --resolve-icon <url>
+if [ "${1:-}" = "--resolve-icon" ]; then
+	resolve_icon "${2:-}"
+	exit 0
+fi
 
+icon=$(resolve_icon "$image")
 
-def resolve_icon(raw):
-    """Turn whatever the toast was showing into a path notify-send can use.
+# Blocks here. On a click the action name is printed; on dismissal, nothing is.
+chosen=$(notify-send -a "$APP_NAME" -i "$icon" -t "$EXPIRE" \
+	-A "$ACTION=Open" "$title" "$body" 2>/dev/null)
 
-    Resolution happens here rather than in the plugin because a friend's avatar
-    lives on Steam's public CDN and has to be fetched -- doing that on the
-    backend thread would stall Steam's UI behind the network. This process is
-    already detached and about to block on the notification anyway.
+[ "$chosen" = "$ACTION" ] || exit 0
 
-    Game art needs no fetch at all: Steam serves it from a virtual host whose
-    paths map one-to-one onto the on-disk library cache.
-    """
-    if not raw:
-        return "steam"
+# No route means Steam itself does nothing for this notification, so neither
+# does this. Dismissing is the whole behaviour.
+[ -n "$route" ] || exit 0
 
-    if raw.startswith("/"):
-        return raw if os.path.exists(raw) else "steam"
-
-    if "steamloopback.host/assets/" in raw:
-        tail = raw.split("steamloopback.host/assets/", 1)[1].split("?", 1)[0]
-        path = os.path.join(LIBRARY_CACHE, tail)
-        return path if os.path.exists(path) else "steam"
-
-    if not raw.startswith(("http://", "https://")):
-        return "steam"
-
-    stem = raw.split("?", 1)[0]
-    ext = os.path.splitext(stem)[1] or ".img"
-    if len(ext) > 5:
-        ext = ".img"
-    cached = os.path.join(ICON_CACHE, hashlib.sha1(stem.encode()).hexdigest() + ext)
-
-    if os.path.exists(cached) and os.path.getsize(cached) > 0:
-        return cached
-
-    try:
-        os.makedirs(ICON_CACHE, exist_ok=True)
-        with urllib.request.urlopen(raw, timeout=ICON_FETCH_TIMEOUT) as response:
-            data = response.read()
-        if not data:
-            return "steam"
-        # Write then rename, so a killed fetch cannot leave a truncated icon
-        # cached forever.
-        tmp = cached + ".part"
-        with open(tmp, "wb") as fh:
-            fh.write(data)
-        os.replace(tmp, cached)
-        return cached
-    except Exception:
-        return "steam"
-
-
-PENDING_DIR = os.path.join(
-    os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
-    "steam-native-notify", "pending")
-
-
-def hand_back(uuid):
-    """Tell the plugin which notification was clicked.
-
-    A file, not a config write. Millennium does deliver an external config
-    change, but it does so by evaluating JavaScript in the main IPC context --
-    and a plugin frontend runs in its own isolated CDP world, so the listener is
-    never reached. A file is seen by the backend regardless of which world
-    anything runs in.
-    """
-    os.makedirs(PENDING_DIR, exist_ok=True)
-    path = os.path.join(PENDING_DIR, uuid)
-    with open(path, "w") as fh:
-        fh.write("")
-    return {"wrote": path}
-
-
-def focus_steam():
-    """Bring Steam forward. Best effort: a failure here is not worth an error."""
-    for argv in FOCUS_HELPERS:
-        try:
-            if subprocess.run(argv, capture_output=True, timeout=3).returncode == 0:
-                return True
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            continue
-    return False
-
-
-def self_test():
-    """Drop a pending click and confirm it lands where the plugin will see it."""
-    print(f"  writing     {hand_back('self-test-uuid')}")
-    path = os.path.join(PENDING_DIR, "self-test-uuid")
-    ok = os.path.exists(path)
-    print(f"  exists      {ok}")
-    if ok:
-        os.unlink(path)
-        print("  cleaned up  True")
-    print("  PASS" if ok else "  FAIL — the file was not written")
-    return 0 if ok else 1
-
-
-def main(argv):
-    if argv[:1] == ["--self-test"]:
-        return self_test()
-
-    if len(argv) < 3:
-        print(__doc__, file=sys.stderr)
-        return 2
-
-    uuid, title, body = argv[0], argv[1], argv[2]
-    icon = resolve_icon(argv[3] if len(argv) > 3 else None)
-    route = argv[4] if len(argv) > 4 and argv[4] else None
-
-    # Blocks until the notification is dismissed or an action is chosen. On a
-    # click the action name is printed to stdout; on dismissal, nothing is.
-    result = subprocess.run(
-        ["notify-send", "-a", APP_NAME, "-i", icon,
-         "-t", str(EXPIRE_MS), "-A", f"{ACTION_ID}=Open", title, body],
-        capture_output=True, text=True,
-    )
-
-    if result.stdout.strip() != ACTION_ID:
-        return 0  # dismissed, expired, or the daemon dropped it — nothing to do
-
-    try:
-        if route:
-            # Steam's own route, decoded from the notification. Preferred over the
-            # replay bridge, which the client ignored for every type tried.
-            subprocess.Popen(["steam", route],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        else:
-            hand_back(uuid)
-        focus_steam()
-    except Exception as e:
-        # Steam may have exited while the notification sat in the tray. The
-        # notification was still delivered, so this is not worth surfacing.
-        print(f"could not reach the plugin: {e}", file=sys.stderr)
-        return 1
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+# Only the route. Raising the Steam window afterwards was tried and removed: it
+# is unknown whether Steam's own toast raises the client when its action fires,
+# and a route that opens a window (a chat that is not already open) gets focus
+# from the window manager anyway. Do not add it back without observing what a
+# real actionable Steam toast does first.
+steam "$route" >/dev/null 2>&1 &
+exit 0

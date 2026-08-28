@@ -1,0 +1,147 @@
+#!/usr/bin/env lua5.4
+-- Exercise backend/main.lua without Steam.
+--
+-- `luac -p` only proves the file parses. Both times this backend broke it was a
+-- nil global at runtime -- PLUGIN_DIR removed by an over-eager edit, and before
+-- that PLUGIN_DIR declared below the function using it. Either would have been
+-- caught here in a second.
+--
+-- Millennium's modules are stubbed and os.execute is captured, so nothing is
+-- spawned and no notification appears.
+
+local root = arg[0]:match("(.*)/tools/[^/]+$") or "."
+
+local logged = {}
+package.preload["logger"] = function()
+	return {
+		info = function(_, m) logged[#logged + 1] = { "info", m } end,
+		error = function(_, m) logged[#logged + 1] = { "error", m } end,
+	}
+end
+-- Stubbed before the module loads: main.lua captures `millennium` at load time,
+-- so a stub installed afterwards would never be seen.
+local stored = {}
+package.preload["millennium"] = function()
+	return {
+		ready = function() end,
+		config = {
+			get = function(k) return stored[k] end,
+			set = function(k, v) stored[k] = v end,
+		},
+	}
+end
+
+-- Enough JSON for the flat payloads the frontend sends: strings, booleans and
+-- numbers. Anything else these messages do not use.
+local function decode(text)
+	local out = {}
+	for key, value in text:gmatch('"([%w_]+)"%s*:%s*"(.-)"') do
+		out[key] = value:gsub('\\"', '"')
+	end
+	for key, value in text:gmatch('"([%w_]+)"%s*:%s*(true)') do
+		out[key] = true
+	end
+	for key, value in text:gmatch('"([%w_]+)"%s*:%s*(false)') do
+		out[key] = false
+	end
+	for key, value in text:gmatch('"([%w_]+)"%s*:%s*(%-?%d+%.?%d*)') do
+		out[key] = tonumber(value)
+	end
+	return out
+end
+local function encode(value)
+	local parts = {}
+	for k, v in pairs(value) do
+		local rendered = type(v) == "string" and ('"' .. v .. '"') or tostring(v)
+		parts[#parts + 1] = '"' .. k .. '":' .. rendered
+	end
+	return "{" .. table.concat(parts, ",") .. "}"
+end
+package.preload["json"] = function()
+	return { decode = decode, encode = encode }
+end
+
+local executed = {}
+local real_execute = os.execute
+os.execute = function(command)
+	executed[#executed + 1] = command
+	return true
+end
+
+local plugin = dofile(root .. "/backend/main.lua")
+
+local failures = 0
+local function check(what, ok, detail)
+	if ok then
+		print(("  ok   %s"):format(what))
+	else
+		failures = failures + 1
+		print(("  FAIL %s%s"):format(what, detail and ("\n       " .. detail) or ""))
+	end
+end
+
+-- on_load must not throw, and must find the helper.
+local ok, err = pcall(plugin.on_load)
+check("on_load runs", ok, err)
+
+local sawHelper = false
+for _, entry in ipairs(logged) do
+	if entry[2]:find("helper: ") then sawHelper = true end
+	if entry[1] == "error" then check("no errors at load", false, entry[2]) end
+end
+check("helper found at load", sawHelper)
+
+-- A notification with no route: the download-complete shape.
+executed = {}
+ok, err = pcall(Notify, '{"title":"Download Complete","body":"Aircar is ready","image":"https://steamloopback.host/assets/1073390/x.jpg?c=1","route":null}')
+check("Notify with no route runs", ok, err)
+check("Notify spawned something", #executed == 1, tostring(#executed) .. " commands")
+if executed[1] then
+	check("spawns the helper", executed[1]:find("tools/notify%-action") ~= nil, executed[1])
+	check("passes the title", executed[1]:find("'Download Complete'", 1, true) ~= nil, executed[1])
+	check("passes the image", executed[1]:find("steamloopback", 1, true) ~= nil, executed[1])
+	check("backgrounded", executed[1]:sub(-1) == "&", executed[1])
+end
+
+-- A notification with a route: the friend-message shape.
+executed = {}
+ok = pcall(Notify, '{"title":"NightFury","body":"hello","image":"","route":"steam://friends/message/76561198257837083"}')
+check("Notify with a route runs", ok)
+if executed[1] then
+	check("passes the route", executed[1]:find("steam://friends/message/", 1, true) ~= nil, executed[1])
+end
+
+-- Markup in the body must be escaped; the daemon parses it.
+executed = {}
+pcall(Notify, '{"title":"Someone","body":"a < b & c","image":"","route":null}')
+if executed[1] then
+	check("escapes markup", executed[1]:find("&lt;", 1, true) and executed[1]:find("&amp;", 1, true), executed[1])
+end
+
+-- A shell metacharacter in the body must not escape its quoting.
+executed = {}
+pcall(Notify, [[{"title":"Someone","body":"; touch /tmp/pwned #","image":"","route":null}]])
+if executed[1] then
+	check("quotes shell metacharacters", executed[1]:find("'; touch /tmp/pwned #'", 1, true) ~= nil, executed[1])
+end
+
+-- Settings round-trip through Millennium's config store.
+ok, err = pcall(SaveSettings, '{"hideSteamToast":true}')
+check("SaveSettings runs", ok, err)
+check("SaveSettings persists", stored.hideSteamToast == true, tostring(stored.hideSteamToast))
+local loaded
+ok, loaded = pcall(LoadSettings)
+check("LoadSettings runs", ok, loaded)
+check("LoadSettings reflects it", type(loaded) == "string" and loaded:find("true") ~= nil, tostring(loaded))
+ok = pcall(SaveSettings, "not json")
+check("SaveSettings survives garbage", ok)
+
+-- Garbage in must not throw.
+executed = {}
+ok = pcall(Notify, "not json at all")
+check("survives an undecodable payload", ok)
+
+os.execute = real_execute
+
+print(failures == 0 and "\nPASS" or ("\n" .. failures .. " FAILED"))
+os.exit(failures == 0 and 0 or 1)
