@@ -13,20 +13,12 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseProto } from './proto.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const proto = readFileSync(join(root, 'vendor', 'steammessages_clientnotificationtypes.proto'), 'utf8');
-
-const enumBody = /enum EClientNotificationType \{([\s\S]*?)\n\}/.exec(proto)[1];
-const types = [...enumBody.matchAll(/k_EClientNotificationType_(\w+)\s*=\s*(\d+)/g)]
-	.map(([, name, index]) => ({ name, index: Number(index) }))
-	.sort((a, b) => a.index - b.index);
-
-const messages = {};
-for (const [, name, body] of proto.matchAll(/message (\w+) \{([\s\S]*?)\n\}/g)) {
-	messages[name] = [...body.matchAll(/(?:optional|required|repeated)\s+[\w.]+\s+(\w+)\s*=\s*\d+/g)]
-		.map((m) => m[1]);
-}
+const { types } = parseProto(
+	readFileSync(join(root, 'vendor', 'steammessages_clientnotificationtypes.proto'), 'utf8'),
+);
 
 /**
  * Steam's click action per type, from the UI bundle (docs/steam-routing.md

@@ -14,31 +14,13 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseProto } from './proto.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PROTO = join(root, 'vendor', 'steammessages_clientnotificationtypes.proto');
 const OUT = join(root, 'frontend', 'generated', 'notifications.ts');
 
-const proto = readFileSync(PROTO, 'utf8');
-
-// --- enum: index -> short name -------------------------------------------
-const enumBody = /enum EClientNotificationType \{([\s\S]*?)\n\}/.exec(proto);
-if (!enumBody) throw new Error('EClientNotificationType not found in the proto');
-
-const types = [...enumBody[1].matchAll(/k_EClientNotificationType_(\w+)\s*=\s*(\d+)/g)]
-	.map(([, name, index]) => ({ name, index: Number(index) }));
-
-// --- messages: name -> { fieldNumber: {name, type} } ----------------------
-const messages = {};
-for (const [, name, body] of proto.matchAll(/message (\w+) \{([\s\S]*?)\n\}/g)) {
-	const fields = {};
-	for (const [, , type, field, num] of body.matchAll(
-		/(optional|required|repeated)\s+([\w.]+)\s+(\w+)\s*=\s*(\d+)/g,
-	)) {
-		fields[Number(num)] = { name: field, type };
-	}
-	if (Object.keys(fields).length) messages[name] = fields;
-}
+const { types, messages } = parseProto(readFileSync(PROTO, 'utf8'));
 
 // Enum value FriendOnline pairs with message CClientNotificationFriendOnline.
 // Twenty-one values carry no message at all, which correctly means no payload

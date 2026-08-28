@@ -19,6 +19,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseProto } from './proto.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const VENDORED = join(root, 'vendor', 'steammessages_clientnotificationtypes.proto');
@@ -49,14 +50,16 @@ async function fetchUpstream() {
 	};
 }
 
-/** Enum values and message names, which is what actually matters downstream. */
+/**
+ * Enum values and message names, which is what actually matters downstream.
+ * parseProto throws on a structural miss, which is the point: a proto that no
+ * longer parses IS drift, and must never fall into the "no change" branch.
+ */
 function surface(text) {
-	const enumBody = /enum EClientNotificationType \{([\s\S]*?)\n\}/.exec(text);
+	const { types, messages } = parseProto(text);
 	return {
-		types: new Set(
-			[...(enumBody?.[1] ?? '').matchAll(/k_EClientNotificationType_(\w+)/g)].map((m) => m[1]),
-		),
-		messages: new Set([...text.matchAll(/^message (\w+)/gm)].map((m) => m[1])),
+		types: new Set(types.map((t) => t.name)),
+		messages: new Set(Object.keys(messages)),
 	};
 }
 
