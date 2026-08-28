@@ -37,7 +37,8 @@ if [[ -n $loaded_line ]]; then
   loaded=$(date -d "$loaded_stamp" +%s 2>/dev/null || echo 0)
   if (( built > loaded )); then
     echo "   STALE — Steam is running an older build."
-    echo "   Toggle the plugin off and on in Millennium > Plugins, then re-run this."
+    echo "   A frontend change needs a FULL Steam restart (toggling the plugin"
+    echo "   reloads only the backend): steam -shutdown, wait, relaunch, re-run this."
   else
     echo "   current."
   fi
