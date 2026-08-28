@@ -3,32 +3,38 @@
 A Millennium plugin that mirrors Steam's in-client notification toasts to the
 desktop notification daemon, preserving the artwork and the click action.
 
-`docs/HANDOFF.md` is the full context: verified facts, dead ends, and the current
-goal. Read it before non-trivial work. `docs/steam-routing.md` is the analysis
-of Steam's own click routing that every route cites; `docs/notification-types.md`
-is the generated type table.
+`docs/HANDOFF.md` is the full context: verified facts, dead ends, and what is
+still open. Read it before non-trivial work. `docs/steam-routing.md` is the
+analysis of Steam's own click routing that every route cites;
+`docs/notification-types.md` is the generated type table.
 
-## Goal
+## State
 
 Routing is built on Steam's own click logic, read out of the shipped UI bundle
 (31 of 62 types route; the rest are inert in Steam or open dialogs no URL
-reaches). The current goal is runtime verification of that catalog. See "The
-open problem: runtime verification" in the handoff.
+reaches). The catalog is runtime-verified for ten types across both
+notification systems, with watched end-to-end clicks for the openurl and
+settings families. What remains is the "Still open" list in the handoff:
+the chat-route click, the tray-only click, one real server event, in-game
+capture.
 
 ## Commands
 
 ```sh
 npm run build          # generate proto types, type-check, bundle
 npm run typecheck      # tsc --noEmit on its own
-tools/test-backend     # exercise backend/main.lua with Millennium stubbed
+npm test               # tools/test-backend (Lua, Millennium stubbed)
+                       # + tools/test-routes (offline route/decode checks)
 tools/capture          # is the running bundle current, did the hook attach,
                        # what did the last notifications carry
 tools/fire TestFriendOnline   # push a real test toast through Steam's pipeline
                               # (needs the tools/fire toggle in plugin settings)
+tools/fire --server 3 '{...}' # inject a server rollup through OnServerNotification
 tools/mep --methods    # talk to Millennium's external protocol (dev only)
 tools/notify-action --resolve-icon <url>
 npm run proto:check    # has Steam's protobuf drifted from vendor/
-npm run gen:table      # regenerate docs/notification-types.md
+npm run gen:table      # regenerate docs/notification-types.md; FAILS when the
+                       # catalog prose disagrees with what routes.ts does
 ```
 
 Install: `ln -s "$PWD" ~/.local/share/millennium/plugins/steam-native-notify`,
@@ -45,16 +51,21 @@ executing, while still logging "Delegating frontend load".
 steam -shutdown && sleep 15 && setsid uwsm-app -- gtk-launch steam.desktop
 ```
 
+`steam -shutdown` returns early, and a relaunch while the old instance lives is
+silently swallowed. If Steam is not up after the sleep, launch again.
+
 **Confirm the running bundle before diagnosing anything.** `tools/capture` says
 so first. A stale bundle is indistinguishable from a broken feature.
 
 **A green build proves very little.** Five runtime failures here were undefined
-names or nil globals the bundler emitted happily. The build now type-checks;
-`tools/test-backend` covers the Lua side. Run both, then confirm behaviour in the
-running client.
+names or nil globals the bundler emitted happily. The build type-checks;
+`npm test` covers the Lua side and the routing subgraph. Run both, then confirm
+behaviour in the running client.
 
 **Diagnostics must never throw.** A debug log calling `JSON.stringify` on a
 BigInt silently killed every notification. Use `safeJson`; keep `dlog` wrapped.
+The log prefixes in `frontend/log.ts` are the contract `tools/capture` greps;
+renaming one blinds the triage tool.
 
 **Millennium callables take exactly one argument, a JSON string.** Key order is
 not preserved onto Lua parameter names. Return values arrive JSON-encoded, so a
@@ -69,14 +80,21 @@ meaningless, and produced three wrong conclusions in this project.
 **Watch the client while clicking.** A `steam://nav/...` route changes a page
 inside the existing window; unwatched, a working navigation looks like nothing.
 
-Download completion is the only reliable self-service trigger:
+**Read a failed `tools/fire` correctly.** No `dev-fire:` log line means the
+settings toggle is off. A `dev-fire:` line with no `from-toast` line means one
+of Steam's own gates ate the toast (SystemUpdate's weekly gate, the user's
+notification preferences, a missing sender persona). The handoff's "Testing
+methodology" section lists them.
+
+Download completion is the only reliable real-event self-service trigger:
 
 ```sh
 steam steam://uninstall/1073390 && steam steam://install/1073390   # Aircar, 0.89GB
 ```
 
-Everything else needs another person or a server-side event. Design captures so
-one real notification yields everything needed; you may only get one.
+Everything else needs tools/fire, another person, or a server-side event.
+Design captures so one real notification yields everything needed; you may
+only get one.
 
 ## Conventions
 
@@ -98,10 +116,16 @@ regexes silently dropped edits and deleted a live declaration twice.
 ## Layout
 
 ```
-frontend/index.tsx        capture, extract, route      (runs inside Steam's CEF)
-frontend/Settings.tsx     Millennium settings panel
+frontend/index.tsx        popup lifecycle: hook, wait, deliver   (Steam's CEF)
+frontend/notification.ts  React tree -> typed notification
+frontend/routes.ts        the routing catalog, cites steam-routing.md
+frontend/urlstore.ts      Steam's URL templates (GetSteamURLList)
+frontend/identity.ts      signed-in steamid64, from the backend
+frontend/log.ts           dlog/safeJson; prefixes are capture's contract
+frontend/devfire.ts       tools/fire door, gated by a setting
+frontend/Settings.tsx     settings panel; settings.ts, one JSON document
 frontend/generated/       generated from vendor/*.proto, do not edit
-backend/main.lua          escaping, spawning           (Millennium Lua host)
-tools/notify-action       delivery and click action    (POSIX sh)
+backend/main.lua          pure marshaller                (Millennium Lua host)
+tools/notify-action       escaping, delivery, click action        (POSIX sh)
 vendor/                   Steam's published .proto plus provenance
 ```
