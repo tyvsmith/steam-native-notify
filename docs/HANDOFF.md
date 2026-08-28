@@ -62,7 +62,10 @@ wrong conclusion.
 **Triggering notifications.** `tools/fire TestDownloadComplete 1073390` pushes
 a real synthesized notification through Steam's full toast pipeline: Steam's
 own NotificationStore (a shared-context global) carries per-type test methods,
-the plugin's debug poll executes the named one within ~3s. This covers most
+the plugin's dev poll executes the named one within ~3s. The poll is gated on
+the "Accept test commands from tools/fire" toggle in the plugin settings,
+which ships OFF; a fire that produces no `dev-fire:` log line at all means the
+toggle, not a gate. This covers most
 client types (`TestFriendOnline`, `TestFriendMessage`, `TestAchievement`,
 `TestIncomingVoiceChat`, ...; search `strTest:` in the bundle). Server-backed
 types (Wishlist, TradeOffer, Comment, MajorSale...) cannot be fired this way:

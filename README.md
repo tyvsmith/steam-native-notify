@@ -67,6 +67,7 @@ backend-only change.
 tools/capture          # is the running bundle current, did the hook attach,
                        # and what did the last notifications carry
 tools/fire TestFriendOnline   # push a real test toast through Steam's pipeline
+                              # (needs the tools/fire toggle in plugin settings)
 tools/mep --methods    # talk to Millennium's external protocol (dev only)
 tools/notify-action --resolve-icon <url>
 npm run proto:check    # has Steam's protobuf drifted from the vendored copy
