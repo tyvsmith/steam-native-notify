@@ -179,19 +179,22 @@ Partially done on 2026-08-27, against the live client:
   (`steam://settings/system`), FriendInviteRollup (pending invites URL),
   FriendInGame (delivery confirmed on the DBus Notify call). `url templates:`
   and `identity:` both load at startup.
-- **The openurl family is click-verified, watched**: a fired Achievement toast
-  was clicked, console_log shows `steam -foreground` then the
-  `steam://openurl/...achievements/` route one second later, and the user
-  confirmed Steam surfaced on the achievements page. The daemon does not
-  auto-fire actions on expiry (verified), so clicks are genuine.
+- **The openurl and settings families are click-verified, watched**: fired
+  Achievement and SystemUpdate toasts were clicked; console_log shows
+  `steam -foreground` then the route one second later each time, and the user
+  confirmed Steam surfaced on the achievements page and opened Settings. The
+  daemon does not auto-fire actions on expiry (verified), so clicks are
+  genuine.
+- **Test fires can be swallowed by per-type gating**: SystemUpdate allows one
+  toast per update type per week, in-memory (`BSkipSystemUpdateNotification`),
+  so repeated `TestSystemUpdate 1` fires show nothing until restart. A
+  `dev-fire:` line with no `from-toast` line means a gate, not a break.
 
 Still open:
 
-1. **Watch a click for the remaining route families.** `steam://settings/...`
-   (SystemUpdate, HardwareUpdate) and the chat-route skip (does the chat
-   dialog come up focused with the main window left alone) have not been
-   watched; `steam://nav/...` was observed before the rewrite and is
-   unchanged.
+1. **Watch a click on the chat-route skip**: does the chat dialog come up
+   focused with the main window left alone (`tools/fire TestFriendOnline`).
+   `steam://nav/...` was observed before the rewrite and is unchanged.
 2. **Server types need real events.** The next wishlist sale or trade offer is
    the first live `eSource=2` capture ever; the debug log dumps the whole
    rollup (`server type=... body=...`), so one event verifies the field names

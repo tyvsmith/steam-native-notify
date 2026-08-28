@@ -207,6 +207,14 @@ real event.
 `tools/fire` writes a command file the plugin's debug poll picks up, so a test
 toast can be fired from the shell while Steam runs.
 
+A fired test can still be swallowed by the type's own gating, silently: the
+test methods call `OnNotification`, which applies the same suppression real
+notifications get. Known case: SystemUpdate is rate-limited to one toast per
+update type per week (`BSkipSystemUpdateNotification`, in-memory), so a repeat
+of `TestSystemUpdate 1` shows nothing until Steam restarts — fire type 2, or
+restart. When a fire produces a `dev-fire:` log line but no `from-toast` line,
+suspect this class of gate, not the pipeline.
+
 ## Answers to the questions this analysis started from
 
 1. **A field or resolver?** No single one. `fnNotificationResolved` is toast
