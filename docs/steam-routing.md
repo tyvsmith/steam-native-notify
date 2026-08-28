@@ -69,6 +69,19 @@ Steam's own table at click time. `steam://openurl/<url>` goes straight to
 `SteamWeb`. `SteamClient.URL.GetSteamURLList` is callable from this plugin's
 frontend, which is how capture-time resolution stays Steam's own data.
 
+Templates observed live on this machine (2026-08-27):
+`CommunityFrontPage=https://steamcommunity.com/`,
+`StoreFrontPage=https://store.steampowered.com/`,
+`HelpFrontPage=https://help.steampowered.com/en/`,
+`PendingGift=https://store.steampowered.com/gifts/`,
+`SteamIDAchievementsPage=https://steamcommunity.com/%mystuff%/stats/appid/%p1%/achievements/`.
+The `%mystuff%` placeholder is not `%pN%`-substituted and appears nowhere in
+the steamui JS or the client binaries; it resolves in the logged-in client.
+From outside, `profiles/<steamid64>` is the same prefix — verified:
+`profiles/<id64>/stats/appid/<appid>/achievements/` 302s to the canonical
+achievements page (`/id/<vanity>/stats/<game>?tab=achievements`, 200). The
+plugin substitutes it that way.
+
 ## Delivery equivalences this plugin relies on
 
 | our route | Steam's handler | why it is the same action |

@@ -29,6 +29,21 @@ function openInClient(url: string | null | undefined): string | null {
 	return `steam://openurl/${url}`;
 }
 
+/**
+ * Some templates address the signed-in user with a `%mystuff%` placeholder
+ * (SteamIDAchievementsPage arrives as
+ * `https://steamcommunity.com/%mystuff%/stats/appid/%p1%/achievements/`).
+ * Steam's JS ResolveURL only substitutes %pN%, so the alias resolves later in
+ * the logged-in client; from outside, `profiles/<steamid64>` is the same
+ * prefix -- verified: that form 302s to the canonical achievements page.
+ * Without an id the route is dropped rather than emitted broken.
+ */
+function fillMyStuff(url: string | null, my: string | null): string | null {
+	if (!url) return null;
+	if (!url.includes('%mystuff%')) return url;
+	return my ? url.replace('%mystuff%', `profiles/${my}`) : null;
+}
+
 function chatWith(person: PbValue | undefined): string | null {
 	if (typeof person === 'bigint') return `steam://friends/message/${person.toString()}`;
 	if (typeof person === 'string' && /^\d{17}$/.test(person)) return `steam://friends/message/${person}`;
@@ -61,11 +76,13 @@ export function clientRoute(type: number, fields: Record<string, PbValue>, me64:
 			return chatWith(fields.steamid);
 
 		// SteamWeb(ResolveURL("SteamIDAchievementsPage", appid)). The template
-		// is Steam's, fetched at startup; only the %p1% substitution runs here.
+		// is Steam's, fetched at startup; %p1% and the %mystuff% alias are the
+		// only substitutions run here.
 		case 5: {
 			const appid = fields.appid;
 			if (typeof appid !== 'number' || appid <= 0) return null;
-			return openInClient(resolveUrl('SteamIDAchievementsPage', appid));
+			const my = me64 && /^\d{17}$/.test(me64) ? me64 : null;
+			return openInClient(fillMyStuff(resolveUrl('SteamIDAchievementsPage', appid), my));
 		}
 
 		// Settings dialog: SystemUpdate opens System; HardwareUpdateAvailable
@@ -122,7 +139,7 @@ export function serverRoute(n: ServerNotification, me64: string | null): string 
 
 	switch (n.type) {
 		case 2: // Gift: ResolveURL("PendingGift")
-			return openInClient(resolveUrl('PendingGift'));
+			return openInClient(fillMyStuff(resolveUrl('PendingGift'), my));
 
 		case 3: // Comment: community + rollup url
 			return typeof n.url === 'string' && n.url && community ? openInClient(community + n.url) : null;

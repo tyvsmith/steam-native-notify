@@ -164,23 +164,37 @@ came from.
 
 ## The open problem: runtime verification
 
-The catalog is cited, built, and type-checked, but mostly unfired. In order:
+Partially done on 2026-08-27, against the live client:
 
-1. **Restart Steam fully** (frontend changed), confirm via `tools/capture`.
-2. **Client types via `tools/fire`**: TestDownloadComplete, TestFriendOnline,
-   TestAchievement, TestIncomingVoiceChat, TestSystemUpdate... For each: does
-   the desktop notification appear, does its click land where Steam's own
-   toast click lands. Check the `url templates:` and `identity:` lines in the
-   log first; every openurl route depends on them.
-3. **Server types need real events.** The next wishlist sale or trade offer is
+- **Verified end to end via `tools/fire`**: Achievement (route resolved from
+  Steam's template with `%mystuff%` filled: `steam://openurl/...profiles/
+  <me64>/stats/appid/570/achievements/`), DownloadCompleted
+  (`steam://nav/games/details/1073390`), FriendOnline
+  (`steam://friends/message/<steamid>`), SystemUpdate
+  (`steam://settings/system`), FriendInviteRollup (pending invites URL),
+  FriendInGame (delivery confirmed on the DBus Notify call). `url templates:`
+  and `identity:` both load at startup.
+- **The click chain fired once for real**: the Achievement test toast was
+  clicked while its popup was up, and console_log.txt shows
+  `ExecCommandLine: steam://openurl/https://steamcommunity.com/profiles/...`
+  five seconds after delivery. The daemon does not auto-fire actions on expiry
+  (verified), so that was a genuine activation reaching the client.
+
+Still open:
+
+1. **Watch the client while clicking each routed type.** ExecCommandLine
+   proves the URL reached the client; that the page visibly lands where
+   Steam's own toast lands still needs eyes on the window, per the testing
+   methodology above.
+2. **Server types need real events.** The next wishlist sale or trade offer is
    the first live `eSource=2` capture ever; the debug log dumps the whole
    rollup (`server type=... body=...`), so one event verifies the field names
    the routes read (`body.link`, `body.ticket`, rollup `url`...). Check those
    against `frontend/routes.ts` before trusting the route.
-4. **`steam://openurl/` from outside the client** is the one delivery
-   equivalence not yet exercised: Steam's own SteamWeb emits it from inside;
-   `tools/notify-action` will hand it to the `steam` binary from outside.
-   Verify once with a fired Achievement toast.
+3. **The popup is the whole click window.** quickshell 1.2 expires the popup
+   after ~8s despite `-t 0` and the action dies with it (the notification
+   centre copy is inert). Orthogonal to routing, but it bounds how a click can
+   ever be tested or used here.
 
 ## Open question deferred
 

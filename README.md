@@ -148,8 +148,11 @@ produced a notification with its summary and body swapped, silently.
   the feed. Their routing lives outside this schema.
 - **In-game is untested.** Whether toasts are capturable while a game has focus
   is unknown.
-- **Unclicked notifications never expire.** `-t 0` leaves one `notify-send`
-  process alive per notification until it is dismissed.
+- **The click action outlives nothing.** Despite `-t 0`, quickshell 1.2
+  expires the popup after ~8 seconds and closes the notification, which ends
+  `notify-send` without firing the action (verified: expiry prints no action).
+  A notification is clickable only while the popup is up; the copy in the
+  notification centre is inert.
 - Millennium's hook preloads into the 32-bit Steam client. On the SteamRT3
   64-bit client it installs, reports success, and does nothing
   ([Millennium #840](https://github.com/SteamClientHomebrew/Millennium/issues/840)).
