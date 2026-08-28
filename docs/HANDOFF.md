@@ -24,6 +24,11 @@ is not. Use:
 steam -shutdown && sleep 15 && setsid uwsm-app -- gtk-launch steam.desktop
 ```
 
+`steam -shutdown` returns before the shutdown finishes, and a launch attempted
+while the old instance is still up is silently swallowed (it pings the dying
+instance and exits). If Steam is not running after the sleep, run the launch
+again; it happened twice in one session here.
+
 **Always confirm the running bundle is the one on disk.** `tools/capture` reports
 this first, because a stale bundle looks exactly like a broken feature.
 
