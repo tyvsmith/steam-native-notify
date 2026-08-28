@@ -209,13 +209,35 @@ toast can be fired from the shell while Steam runs.
 
 A fired test can still be swallowed by the type's own gating, silently: the
 test methods call `OnNotification`, which applies the same suppression real
-notifications get. Known case: SystemUpdate (`BSkipSystemUpdateNotification`,
-state held in memory until restart) — the same update type repeats at most
-once a week, and type 1 ("update available") after a type 2 ("restart
-required") is suppressed unconditionally, since a restart notice supersedes an
-availability notice. Both verified by firing. When a fire produces a
-`dev-fire:` log line but no `from-toast` line, suspect this class of gate, not
-the pipeline.
+notifications get. Known cases, all verified by firing:
+
+- SystemUpdate (`BSkipSystemUpdateNotification`, state held in memory until
+  restart): the same update type repeats at most once a week, and type 1
+  ("update available") after a type 2 ("restart required") is suppressed
+  unconditionally, since a restart notice supersedes an availability notice.
+- Server types are gated per user preference: `BToastEnabled` checks the
+  stored `notificationPreferences` row for the server type (cached in
+  `userdata/<accountid>/config/localconfig.vdf` under
+  `CachedNotificationPreferences`; bit 8 of `notification_targets` is the
+  toast), falling back to the item's own `notification_targets` when no row
+  exists. On this machine Wishlist, Comment, Item, HelpRequest and
+  PlaytestInvite have the toast bit off, so those types never toast here —
+  synthetic or real — until enabled in Steam Settings → Notifications.
+
+When a fire produces a `dev-fire:` log line but no `from-toast` line, suspect
+this class of gate, not the pipeline.
+
+Server types go through the real ingestion path instead of the stubbed test
+methods: `tools/fire --server <type> '<body-json>'` (and `--wishlist [appid]`)
+hands a synthetic rollup to `OnServerNotification` — found by webpack export
+search, since the server store is not a window global — which is the exact
+entry live server events take. Verified live with a Gift: the toast rendered
+by Steam's own component, `eSource=2` extraction read
+`data.type`/`data.item.body_data` as coded, and the route resolved to
+`steam://openurl/` + the `PendingGift` template. The loader
+(`LoadServerToastRequiredData`) blocks some types on data being present:
+Wishlist/AsyncGame need a known appid, Gift/TradeOffer need the
+account's persona loaded (a friend works), FriendInvite needs the requestor's.
 
 ## Answers to the questions this analysis started from
 

@@ -191,16 +191,27 @@ Partially done on 2026-08-27, against the live client:
   (`BSkipSystemUpdateNotification`, verified by firing). A `dev-fire:` line
   with no `from-toast` line means a gate, not a break.
 
+- **The server (eSource=2) path is verified via injection**: `tools/fire
+  --server` hands a synthetic rollup to Steam's real `OnServerNotification`
+  ingestion. A Gift toast rendered through Steam's own component, extraction
+  read `data.type` and `data.item.body_data` as coded, and the route resolved
+  to `steam://openurl/` + the `PendingGift` template — the first server-
+  sourced capture, without waiting for a live event.
+- **Server toasts obey the user's notification preferences**: on this machine
+  Wishlist, Comment, Item, HelpRequest and PlaytestInvite have the toast bit
+  off (`CachedNotificationPreferences` in localconfig.vdf), so those types
+  never toast here until enabled in Steam Settings → Notifications. A real
+  wishlist sale would be suppressed by Steam itself, not by this plugin.
+
 Still open:
 
 1. **Watch a click on the chat-route skip**: does the chat dialog come up
    focused with the main window left alone (`tools/fire TestFriendOnline`).
    `steam://nav/...` was observed before the rewrite and is unchanged.
-2. **Server types need real events.** The next wishlist sale or trade offer is
-   the first live `eSource=2` capture ever; the debug log dumps the whole
-   rollup (`server type=... body=...`), so one event verifies the field names
-   the routes read (`body.link`, `body.ticket`, rollup `url`...). Check those
-   against `frontend/routes.ts` before trusting the route.
+2. **A real server event is still worth one look.** Injection verifies the
+   pipeline against the rollup shape the bundle describes; a live wishlist
+   sale or trade offer confirms the server actually sends that shape (and the
+   Comment rollup's `url` field, which no injection has exercised).
 3. **The popup is the whole click window.** quickshell 1.2 expires the popup
    after ~8s despite `-t 0` and the action dies with it (the notification
    centre copy is inert). Orthogonal to routing, but it bounds how a click can

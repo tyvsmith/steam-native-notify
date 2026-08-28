@@ -1,4 +1,4 @@
-import { callable, definePlugin, IconsModule } from '@steambrew/client';
+import { callable, definePlugin, findModuleExport, IconsModule } from '@steambrew/client';
 import { fieldsForType, typeName } from './generated/notifications';
 import {
 	clientRoute,
@@ -356,13 +356,85 @@ function pluginIcon(): any {
  */
 const DEV_POLL_MS = 3000;
 
+/**
+ * The server notification store is not a window global; it is found the way
+ * lead 1 always suggested, by webpack export search. Its OnServerNotification
+ * is the real ingestion path for eSource=2 notifications -- the one live
+ * server events take -- so a synthetic rollup pushed through it exercises
+ * capture, extraction and routing exactly as a real wishlist sale would.
+ * Valve's own server-type test methods are stubbed out in the shipped build,
+ * which is why this door exists.
+ */
+let serverStore: any;
+
+function findServerNotificationStore(): any {
+	if (serverStore) return serverStore;
+	try {
+		serverStore = findModuleExport((e: any) => {
+			try {
+				return typeof e?.OnServerNotification === 'function' && typeof e?.MarkItemRead === 'function';
+			} catch {
+				return false;
+			}
+		});
+	} catch (e) {
+		dlog(`server store lookup failed: ${(e as Error)?.message ?? e}`);
+	}
+	return serverStore;
+}
+
+/**
+ * A minimal rollup, shaped like the ones OnServerNotification receives:
+ * everything the toast path reads from it is a plain property
+ * (item.body_data, rgunread, timestamp), verified against the bundle.
+ */
+function injectServerNotification(type: number, body: unknown): void {
+	const store = findServerNotificationStore();
+	if (!store) {
+		dlog('dev-fire: server notification store not found');
+		return;
+	}
+	const id = Date.now() % 1_000_000_000;
+	const now = Math.floor(Date.now() / 1000);
+	const rollup = {
+		type,
+		rollup_key: id,
+		item: {
+			notification_id: id,
+			// Bitfield of delivery targets; 8 is the toast bit, and
+			// BToastEnabled falls back to this when the user has no stored
+			// preference for the type. All bits set, so the fallback shows it.
+			notification_targets: 15,
+			notification_type: type,
+			body_data: JSON.stringify(body ?? {}),
+			read: false,
+			viewed: 0,
+			timestamp: now,
+		},
+		rgunread: [id],
+		rgread: [] as number[],
+		timestamp: now,
+	};
+	dlog(`dev-fire: OnServerNotification type=${type} body=${safeJson(body)}`);
+	store.OnServerNotification(rollup, 0 /* New */);
+}
+
 function pollDevCommands(): void {
 	if (!debug) return;
 	window.setInterval(async () => {
 		try {
 			const raw = await takeDevCommand();
-			const cmd = parseCallableJson<{ call?: string; args?: unknown[] } | null>(raw, null);
-			if (!cmd?.call) return;
+			const cmd = parseCallableJson<{
+				call?: string;
+				args?: unknown[];
+				server?: { type: number; body?: unknown };
+			} | null>(raw, null);
+			if (!cmd) return;
+			if (cmd.server && typeof cmd.server.type === 'number') {
+				injectServerNotification(cmd.server.type, cmd.server.body);
+				return;
+			}
+			if (!cmd.call) return;
 			const store: any = Reflect.get(globalThis, 'NotificationStore');
 			const fn = store?.[cmd.call];
 			if (typeof fn !== 'function') {
