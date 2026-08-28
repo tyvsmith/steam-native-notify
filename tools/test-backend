@@ -34,6 +34,8 @@ end
 -- Enough JSON for the flat payloads the frontend sends: strings, booleans and
 -- numbers. Anything else these messages do not use.
 local function decode(text)
+	-- The real json module errors on non-JSON; the permissive stub hid that.
+	if not text:match("^%s*{") then error("not a JSON object") end
 	local out = {}
 	for key, value in text:gmatch('"([%w_]+)"%s*:%s*"(.-)"') do
 		out[key] = value:gsub('\\"', '"')
@@ -126,16 +128,26 @@ if executed[1] then
 	check("quotes shell metacharacters", executed[1]:find("'; touch /tmp/pwned #'", 1, true) ~= nil, executed[1])
 end
 
--- Settings round-trip through Millennium's config store.
-ok, err = pcall(SaveSettings, '{"hideSteamToast":true}')
+-- Settings round-trip through Millennium's config store as one JSON document;
+-- the backend stores the payload verbatim and never learns a setting name.
+ok, err = pcall(SaveSettings, '{"hideSteamToast":true,"someFutureSetting":7}')
 check("SaveSettings runs", ok, err)
-check("SaveSettings persists", stored.hideSteamToast == true, tostring(stored.hideSteamToast))
+check("SaveSettings stores the document verbatim",
+	stored.settings == '{"hideSteamToast":true,"someFutureSetting":7}', tostring(stored.settings))
 local loaded
 ok, loaded = pcall(LoadSettings)
 check("LoadSettings runs", ok, loaded)
-check("LoadSettings reflects it", type(loaded) == "string" and loaded:find("true") ~= nil, tostring(loaded))
+check("LoadSettings returns the document", loaded == stored.settings, tostring(loaded))
 ok = pcall(SaveSettings, "not json")
 check("SaveSettings survives garbage", ok)
+check("garbage is not stored", stored.settings ~= "not json", tostring(stored.settings))
+
+-- Migration: an install that stored hideSteamToast under its own key still
+-- loads it until the first save writes the document.
+stored.settings = nil
+stored.hideSteamToast = true
+ok, loaded = pcall(LoadSettings)
+check("LoadSettings migrates the old key", ok and type(loaded) == "string" and loaded:find('"hideSteamToast":true', 1, true) ~= nil, tostring(loaded))
 
 -- Identity: shape only. The steamid comes from the machine's loginusers.vdf,
 -- which this test does not fabricate; present it must be a steamid64, absent

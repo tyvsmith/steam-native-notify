@@ -63,27 +63,28 @@ function Notify(payload)
     return "ok"
 end
 
---- Called from the frontend via callable('Log'), so toast extraction can be
---- traced from Millennium's log without a devtools session attached.
---- Settings are stored by Millennium, which persists them in config.json and
---- keeps them across updates. The frontend holds the live copy; this end only
---- reads and writes.
-local SETTING_HIDE = "hideSteamToast"
+--- Settings are stored by Millennium, which persists them across updates. The
+--- whole settings object travels as ONE JSON document under one key: the
+--- frontend owns every name and default (its DEFAULTS merge absorbs a missing
+--- or older shape), so adding a setting never touches this file. Earlier
+--- builds stored hideSteamToast under its own key; read once as a fallback.
+local SETTINGS_KEY = "settings"
 
 function LoadSettings()
-    local stored = millennium.config.get(SETTING_HIDE)
-    return json.encode({ hideSteamToast = stored == true })
+    local stored = millennium.config.get(SETTINGS_KEY)
+    if type(stored) == "string" and stored ~= "" then return stored end
+    return json.encode({ hideSteamToast = millennium.config.get("hideSteamToast") == true })
 end
 
 function SaveSettings(payload)
-    local ok, data = pcall(json.decode, tostring(payload or "{}"))
+    local text = tostring(payload or "")
+    local ok, data = pcall(json.decode, text)
     if not ok or type(data) ~= "table" then
-        logger:error("[steam-native-notify] undecodable settings: " .. tostring(payload))
+        logger:error("[steam-native-notify] undecodable settings: " .. text)
         return "error"
     end
 
-    millennium.config.set(SETTING_HIDE, data.hideSteamToast == true)
-    logger:info("[steam-native-notify] hideSteamToast = " .. tostring(data.hideSteamToast == true))
+    millennium.config.set(SETTINGS_KEY, text)
     return "ok"
 end
 
