@@ -1,6 +1,7 @@
 import { callable } from 'millennium';
 import { dlog } from './log';
 import {
+	openChatInOverlay,
 	openDialogInOverlay,
 	openInOverlay,
 	openMediaInOverlay,
@@ -59,13 +60,17 @@ function desktopClick(route: string): void {
 	} catch (e) {
 		dlog(`click-bridge: raise failed: ${(e as Error)?.message ?? e}`);
 	}
-	try {
-		const sc: any = Reflect.get(globalThis, 'SteamClient');
-		dlog(`click-bridge: desktop ${route}`);
-		sc?.URL?.ExecuteSteamURL?.(route);
-	} catch (e) {
-		dlog(`click-bridge: navigate failed: ${(e as Error)?.message ?? e}`);
-	}
+	// Navigate after the raise has landed: the focus shift is what makes the
+	// client's own handlers (chat especially) pick the desktop surface.
+	window.setTimeout(() => {
+		try {
+			const sc: any = Reflect.get(globalThis, 'SteamClient');
+			dlog(`click-bridge: desktop ${route}`);
+			sc?.URL?.ExecuteSteamURL?.(route);
+		} catch (e) {
+			dlog(`click-bridge: navigate failed: ${(e as Error)?.message ?? e}`);
+		}
+	}, 300);
 }
 
 export function armClickBridge(): void {
@@ -97,7 +102,13 @@ export function armClickBridge(): void {
 				return;
 			}
 			let opened: boolean;
-			if (route.startsWith(OPENURL_PREFIX)) {
+			if (route.startsWith('steam://friends/message/')) {
+				// The chat dialog, in the overlay explicitly: the ingestion's
+				// "chat" case (ActivateGameOverlayToUser). The external URL
+				// form lets the client pick the surface, and it picks the
+				// overlay whenever a game runs -- even unfocused.
+				opened = openChatInOverlay(appid, route.slice('steam://friends/message/'.length));
+			} else if (route.startsWith(OPENURL_PREFIX)) {
 				opened = openInOverlay(appid, route.slice(OPENURL_PREFIX.length));
 			} else if (route.startsWith('steam://settings/')) {
 				// The ingestion's "settings" dialog IS Settings("System").

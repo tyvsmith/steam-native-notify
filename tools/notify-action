@@ -158,7 +158,11 @@ click_plan() {
 	fi
 	case ${1:-} in
 	"") echo none ;;
-	steam://friends/message/*) echo route ;;
+	# Chat: on the desktop the external URL is proven; in overlay context it
+	# must ride the bridge, because the client's URL handler opens the
+	# overlay chat whenever a game is RUNNING, focused or not -- the bridge
+	# re-checks focus and picks the surface explicitly.
+	steam://friends/message/*) in_overlay "${3:-}" && echo overlay || echo route ;;
 	# Settings routes ride the bridge: the overlay ingestion's "settings"
 	# dialog opens Settings, which is where Steam's own in-game clicks land
 	# for BOTH SystemUpdate and HardwareUpdate (observed; the overlay runs

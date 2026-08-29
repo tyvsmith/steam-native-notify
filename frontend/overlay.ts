@@ -77,7 +77,7 @@ export async function runningOverlayAppId(): Promise<number | null> {
 	}
 }
 
-function sendOverlayRequest(appid: number, bWebPage: boolean, strDialog: string): boolean {
+function sendOverlayRequest(appid: number, bWebPage: boolean, strDialog: string, steamidTarget: string = '0'): boolean {
 	const store = findOverlayStore();
 	if (!store) return false;
 	const request = {
@@ -86,13 +86,23 @@ function sendOverlayRequest(appid: number, bWebPage: boolean, strDialog: string)
 		bWebPage,
 		strDialog,
 		eWebPageMode: 0 /* Default: non-modal, RouteNavigateToSteamWeb */,
-		steamidTarget: '0',
+		steamidTarget,
 		eFlag: 0 /* OverlayToStoreFlag_None */,
 		strConnectString: '',
 	};
-	dlog(`overlay: open appid=${appid} ${safeJson(strDialog)}`);
+	dlog(`overlay: open appid=${appid} ${safeJson(strDialog)} target=${steamidTarget}`);
 	store.OnGameOverlayActivateRequested(request);
 	return true;
+}
+
+/**
+ * Open a 1:1 chat in the game's overlay -- the ingestion's "chat" case, i.e.
+ * the SDK's ActivateGameOverlayToUser("chat", steamid). Needed because an
+ * external steam://friends/message URL lets the client pick the surface, and
+ * it picks the overlay whenever a game is running, focused or not.
+ */
+export function openChatInOverlay(appid: number, steamid64: string): boolean {
+	return sendOverlayRequest(appid, false, 'chat', steamid64);
 }
 
 /** Open a web page in the running game's overlay browser. */
