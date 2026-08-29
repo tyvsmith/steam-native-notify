@@ -278,19 +278,26 @@ asserts it. Unclicked notifications never touch the `steam` binary at all.
 
 ## Still open
 
-1. **Watch a click on the chat-route skip**: does the chat dialog come up
-   focused with the main window left alone (`tools/fire TestFriendOnline`).
-   `steam://nav/...` was observed before the rewrite and is unchanged.
-2. **The tray-only case end to end**: window created, focused, and navigated
-   by one click. The raise of an existing background window is the part
-   verified by observation.
+1. ~~Watch a click on the chat-route skip.~~ User-verified 2026-08-29,
+   including in-game: with Helldivers 2 focused, the click opened the chat in
+   the Steam overlay, main window left alone.
+2. ~~The tray-only case end to end.~~ User-verified 2026-08-29.
 3. **One real server event is still worth a look.** Injection verifies the
    pipeline against the rollup shape the bundle describes; a live wishlist
    sale or trade offer confirms the server actually sends that shape,
    especially the Comment rollup's `url` field, which no injection has
    exercised.
-4. **In-game capture is untested.** Whether toasts are capturable while a game
-   has focus is unknown.
+4. ~~In-game capture is untested.~~ User-verified 2026-08-29 with Helldivers 2
+   running: toasts are captured and mirrored, and both copies are clickable.
+   The session also exposed a divergence, since fixed: Steam's own in-game
+   toast clicks ALL stay in the overlay, and the client routes even our chat
+   click into the overlay by itself -- but the activation preamble
+   (`steam` before the route) raised the desktop client OVER the game.
+   `click_plan` now skips activation while a game is running (detected at
+   click time via `pgrep -f 'SteamLaunch AppId='`; `NOTIFY_ACTION_GAME`
+   overrides for tests). What remains open: an in-game click on a non-chat
+   route after the fix -- expected to open the overlay browser like Steam's
+   own, but not yet observed.
 5. **The popup is the whole click window.** quickshell 1.2 expires the popup
    after ~8s despite `-t 0` and the action dies with it (the notification
    centre copy is inert). Orthogonal to routing, but it bounds how a click can

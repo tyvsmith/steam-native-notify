@@ -125,11 +125,27 @@ resolve_icon() {
 # Chat routes are the exception: the client's friends/message handler passes
 # btakefocus=1 and force-focuses the chat window itself. Raising the main
 # window at the same time could bury the dialog the click just opened.
+#
+# A running game is the other exception. Steam's own in-game toast clicks all
+# stay in the overlay, and the client routes a chat click there by itself
+# (observed 2026-08-29, Helldivers 2) -- but the activation preamble raised
+# the desktop client OVER the game, which Steam's own click never does. So
+# while a game is running, send the route alone and let the client put it
+# where it puts its own clicks. Detection is Steam's launch chain: every
+# title runs under `reaper SteamLaunch AppId=N`, checked at click time.
+game_running() {
+	case ${NOTIFY_ACTION_GAME:-auto} in
+	yes) return 0 ;;
+	no) return 1 ;;
+	esac
+	pgrep -f 'SteamLaunch AppId=' >/dev/null 2>&1
+}
+
 click_plan() {
 	case ${1:-} in
 	"") echo none ;;
 	steam://friends/message/*) echo route ;;
-	*) echo activate+route ;;
+	*) game_running && echo route || echo activate+route ;;
 	esac
 }
 
