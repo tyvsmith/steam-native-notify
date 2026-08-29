@@ -59,8 +59,11 @@ tools/notify-action --escape-markup 'a < b & c'
 - `--click-plan` prints `none` (empty route), `route` (chat routes — they
   self-focus), or `activate+route` (everything else: `steam; steam "<route>"`,
   activation first so the window surfaces).
-- `--escape-markup` shows the body as delivered; the daemon parses body markup,
-  so `&`, `<`, `>` must come out entity-escaped.
+- `--escape-markup` shows the escaped form; whether it is applied depends on
+  the daemon: `--daemon-caps` prints `body-markup` (escaping on) or `plain`
+  (raw body). A body showing literal `&lt;` means escaping ran for a daemon
+  that never advertised `body-markup` (or the caps query failed and the safe
+  default kicked in).
 
 Full-chain manual run (blocks until the notification is clicked or dismissed):
 

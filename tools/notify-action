@@ -10,7 +10,8 @@
 # Usage: notify-action <title> <body> [image] [steam-url]
 #        notify-action --resolve-icon <url>       print the resolved icon path
 #        notify-action --click-plan <steam-url>   print what a click would run
-#        notify-action --escape-markup <text>     print the body as delivered
+#        notify-action --escape-markup <text>     print the escaped form
+#        notify-action --daemon-caps              body-markup | plain
 #
 # <body> arrives raw; markup escaping happens here, immediately before the
 # notify-send that renders it. The four positional arguments are a contract
@@ -38,11 +39,26 @@ body=${2:-}
 image=${3:-}
 route=${4:-}
 
-# The daemon advertises `body-markup`, so the body is parsed as markup and a
+# A daemon that advertises `body-markup` parses the body as markup, and a
 # bare `<` or `&` from a chat message would be swallowed or mangled. Only the
 # body is parsed per the spec; the summary is passed through untouched.
 escape_markup() {
 	printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
+# Whether to escape is the daemon's call, advertised via GetCapabilities:
+# quickshell, GNOME, KDE and mako parse markup; dunst is configurable either
+# way. Escaping for a plain-text daemon shows literal entities, so ask. If the
+# daemon is unreachable (login race; the send below retries), assume markup --
+# right for the daemons that dominate, merely cosmetic when wrong.
+daemon_parses_markup() {
+	caps=$(gdbus call --session --dest org.freedesktop.Notifications \
+		--object-path /org/freedesktop/Notifications \
+		--method org.freedesktop.Notifications.GetCapabilities 2>/dev/null) || return 0
+	case $caps in
+	*body-markup*) return 0 ;;
+	*) return 1 ;;
+	esac
 }
 
 # Turn whatever the toast was showing into something notify-send can display.
@@ -136,8 +152,15 @@ if [ "${1:-}" = "--escape-markup" ]; then
 	exit 0
 fi
 
+if [ "${1:-}" = "--daemon-caps" ]; then
+	daemon_parses_markup && echo body-markup || echo plain
+	exit 0
+fi
+
 icon=$(resolve_icon "$image")
-body=$(escape_markup "$body")
+if daemon_parses_markup; then
+	body=$(escape_markup "$body")
+fi
 
 # Blocks here. On a click the action name is printed; on dismissal, nothing is.
 #

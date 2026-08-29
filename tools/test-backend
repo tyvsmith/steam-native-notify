@@ -294,6 +294,40 @@ else
 	print("  skip delivery retry (mktemp failed)")
 end
 
+-- Markup escaping is conditional on the daemon's advertised capabilities:
+-- a plain-text daemon must receive the raw body, a markup daemon the escaped
+-- one, and an unreachable daemon defaults to escaped. gdbus and notify-send
+-- are PATH-shimmed; the body is notify-send's tenth argument.
+local function delivered_body(gdbus_script)
+	local h = io.popen("mktemp -d")
+	local dir = h:read("*l")
+	h:close()
+	if not dir or dir == "" then return nil end
+	local g = assert(io.open(dir .. "/gdbus", "w"))
+	g:write("#!/bin/sh\n" .. gdbus_script .. "\n")
+	g:close()
+	local ns = assert(io.open(dir .. "/notify-send", "w"))
+	ns:write(([[#!/bin/sh
+printf '%%s' "${10}" > %s/body
+exit 0
+]]):format(dir))
+	ns:close()
+	io.popen("chmod +x '" .. dir .. "/gdbus' '" .. dir .. "/notify-send'"):close()
+	io.popen("PATH='" .. dir .. "':\"$PATH\" " .. root
+		.. "/tools/notify-action 'T' 'a < b & c' '' ''; echo done"):read("*a")
+	local b = io.open(dir .. "/body", "r")
+	local body = b and b:read("*a") or "(nothing delivered)"
+	if b then b:close() end
+	io.popen("rm -rf '" .. dir .. "'"):close()
+	return body
+end
+check("caps: markup daemon gets the escaped body",
+	delivered_body([[echo "(['actions', 'body', 'body-markup'],)"]]) == "a &lt; b &amp; c")
+check("caps: plain-text daemon gets the raw body",
+	delivered_body([[echo "(['actions', 'body'],)"]]) == "a < b & c")
+check("caps: unreachable daemon defaults to escaped",
+	delivered_body([[exit 1]]) == "a &lt; b &amp; c")
+
 os.execute = real_execute
 os.getenv = real_getenv
 if tmp_cache:find("^/tmp/") then os.execute("rm -rf '" .. tmp_cache .. "'") end
