@@ -234,13 +234,13 @@ ok = pcall(Notify, "not json at all")
 check("survives an undecodable payload", ok)
 
 -- notify-action's click plan: chat routes self-focus inside Steam and must not
--- get the activation preamble; everything else must, EXCEPT while a game is
--- running, when raising the desktop client would pull the player out of the
--- game. The game check is pinned via NOTIFY_ACTION_GAME so the tests do not
--- depend on whether a game happens to be running.
-local function click_plan(route, game, action)
-	local handle = io.popen("NOTIFY_ACTION_GAME=" .. (game or "no") .. " "
-		.. root .. "/tools/notify-action --click-plan '" .. route .. "' '" .. (action or "") .. "'")
+-- get the activation preamble; everything else must, EXCEPT in the overlay
+-- context (Steam rendered its toast in the focused game's overlay), where
+-- raising the desktop client would pull the player out of the game. The
+-- context is an explicit argument, so the plan never inspects the system.
+local function click_plan(route, ctx, action)
+	local handle = io.popen(root .. "/tools/notify-action --click-plan '" .. route
+		.. "' '" .. (action or "") .. "' '" .. (ctx or "") .. "'")
 	local plan = handle:read("*l")
 	handle:close()
 	return plan
@@ -250,12 +250,12 @@ check("click plan: nav route activates first", click_plan("steam://nav/games/det
 check("click plan: openurl route activates first", click_plan("steam://openurl/https://steamcommunity.com/x") == "activate+route")
 check("click plan: settings route activates first", click_plan("steam://settings/system") == "activate+route")
 check("click plan: no route does nothing", click_plan("") == "none")
-check("click plan: in-game openurl route goes to the overlay bridge", click_plan("steam://openurl/https://steamcommunity.com/x", "yes") == "overlay")
-check("click plan: in-game system settings goes to the overlay bridge", click_plan("steam://settings/system", "yes") == "overlay")
-check("click plan: in-game controller settings goes to the overlay bridge", click_plan("steam://settings/controller", "yes") == "overlay")
-check("click plan: in-game nav route is inert", click_plan("steam://nav/games/details/570", "yes") == "none")
-check("click plan: in-game chat route unchanged", click_plan("steam://friends/message/76561198000000000", "yes") == "route")
-check("click plan: in-game action token goes to the action bridge", click_plan("", "yes", "media") == "overlay-action")
+check("click plan: in-game openurl route goes to the overlay bridge", click_plan("steam://openurl/https://steamcommunity.com/x", "overlay") == "overlay")
+check("click plan: in-game system settings goes to the overlay bridge", click_plan("steam://settings/system", "overlay") == "overlay")
+check("click plan: in-game controller settings goes to the overlay bridge", click_plan("steam://settings/controller", "overlay") == "overlay")
+check("click plan: in-game nav route is inert", click_plan("steam://nav/games/details/570", "overlay") == "none")
+check("click plan: in-game chat route unchanged", click_plan("steam://friends/message/76561198000000000", "overlay") == "route")
+check("click plan: in-game action token goes to the action bridge", click_plan("", "overlay", "media") == "overlay-action")
 check("click plan: desktop action token stays inert", click_plan("", "no", "media") == "none")
 
 -- notify-action's markup escaping: the daemon parses the body as markup, so

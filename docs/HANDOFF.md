@@ -313,6 +313,12 @@ asserts it. Unclicked notifications never touch the `steam` binary at all.
    Gift click -> gifts page in the overlay browser, no focus theft.
    Bridge triage: every consumed click logs `click-bridge:`; a consumed
    click with no line after it was the double-parse bug, fixed in c07c4d1.
+   In-game vs desktop is Steam's own per-focus decision, not process
+   detection: Steam renders each toast in the surface the user is on
+   (overlay-context names `notificationtoasts_uid<appid>-...` vs
+   `..._desktop`), and the captured name rides the payload as `ctx`.
+   A desktop-context click opens the client window even while a game runs
+   unfocused -- exactly what Steam's own toast does (observed).
 5. **The popup is the whole click window.** quickshell 1.2 expires the popup
    after ~8s despite `-t 0` and the action dies with it (the notification
    centre copy is inert). Orthogonal to routing, but it bounds how a click can

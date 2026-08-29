@@ -175,8 +175,14 @@ function deliverToast(win: Window, name: string, text: string): void {
 		route = null;
 		ingame = null;
 	}
-	dlog(`toast ${name} -> ${safeJson({ title, body, image, kind, route, ingame })}`);
-	void notify({ payload: safeJson({ title, body, image, route, ingame }) });
+	// Steam renders each toast in the surface the user is on: overlay-context
+	// names (notificationtoasts_uid<appid>-...) mean the game was focused,
+	// _desktop names mean it was not -- even with a game running. The click
+	// follows the same decision (observed: Steam's own desktop-context toast
+	// click opens the window, not the overlay, while a game runs unfocused).
+	const ctx = name.startsWith('notificationtoasts_uid') ? 'overlay' : '';
+	dlog(`toast ${name} -> ${safeJson({ title, body, image, kind, route, ingame, ctx })}`);
+	void notify({ payload: safeJson({ title, body, image, route, ingame, ctx }) });
 
 	// In-game, notify-action delivers the click back through a file instead of
 	// a steam:// URL; arm the bridge that picks it up (clickbridge.ts).
