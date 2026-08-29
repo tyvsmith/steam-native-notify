@@ -2,7 +2,7 @@ import { callable, findModuleExport } from 'millennium';
 import { dlog, safeJson } from './log';
 import { parseCallableJson, settings } from './settings';
 import { openDialogInOverlay, openInOverlay, openMediaInOverlay } from './overlay';
-import { inspectReplayStash, invokeReplayHandler } from './replay';
+import { closeMainWindowForExperiment, inspectReplayStash, invokeReplayHandler } from './replay';
 
 /**
  * The tools/fire door: dev machinery, fenced off from the capture path.
@@ -155,6 +155,7 @@ export function startDevFirePoll(): void {
 			if (cmd.replay) {
 				if (cmd.replay.call === 'inspect') inspectReplayStash();
 				else if (cmd.replay.call === 'invoke') invokeReplayHandler(cmd.replay.name);
+				else if (cmd.replay.call === 'close-main') closeMainWindowForExperiment();
 				else dlog(`replay: unknown call ${String(cmd.replay.call)}`);
 				return;
 			}

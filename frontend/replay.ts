@@ -186,6 +186,30 @@ export function stashReplayCandidates(win: Window, name: string): void {
 	}
 }
 
+/**
+ * Close the main window the way the titlebar X does, for the lifecycle
+ * matrix's closed-to-tray cell. Driven from inside the client because the
+ * compositor-side close needs a focused-window-safe dispatch this experiment
+ * has no business risking.
+ */
+export function closeMainWindowForExperiment(): void {
+	try {
+		const mgr: any = Reflect.get(globalThis, 'g_PopupManager');
+		const popups: Iterable<any> = mgr?.m_mapPopups?.values?.() ?? [];
+		for (const popup of popups) {
+			const win = popup?.window ?? popup?.m_popup;
+			if (typeof win?.name === 'string' && win.name.startsWith('SP Desktop')) {
+				dlog('replay: close-main -> closing the main window');
+				win.SteamClient?.Window?.Close?.();
+				return;
+			}
+		}
+		dlog('replay: close-main -> main window not found');
+	} catch (e) {
+		dlog(`replay: close-main failed: ${(e as Error)?.message ?? e}`);
+	}
+}
+
 /** Dump the stash: names, ages, candidate metadata. The --replay inspect door. */
 export function inspectReplayStash(): void {
 	try {
