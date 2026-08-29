@@ -1,6 +1,6 @@
 import { callable } from 'millennium';
 import { dlog } from './log';
-import { openInOverlay, runningOverlayAppId } from './overlay';
+import { openDialogInOverlay, openInOverlay, runningOverlayAppId } from './overlay';
 
 /**
  * The in-game click bridge. With a game running, a desktop notification's
@@ -46,10 +46,6 @@ export function armClickBridge(): void {
 			const route = typeof raw === 'string' && raw ? (JSON.parse(raw) as string) : '';
 			if (typeof route !== 'string' || !route) return;
 			dlog(`click-bridge: ${route}`);
-			if (!route.startsWith(OPENURL_PREFIX)) {
-				dlog(`click-bridge: unbridgeable route ${route}`);
-				return;
-			}
 			const appid = await runningOverlayAppId();
 			if (appid === null) {
 				// The game quit between the click and this poll; the desktop
@@ -57,9 +53,18 @@ export function armClickBridge(): void {
 				dlog(`click-bridge: no overlay up for ${route}`);
 				return;
 			}
-			if (!openInOverlay(appid, route.slice(OPENURL_PREFIX.length))) {
-				dlog('click-bridge: overlay store not found');
+			let opened: boolean;
+			if (route.startsWith(OPENURL_PREFIX)) {
+				opened = openInOverlay(appid, route.slice(OPENURL_PREFIX.length));
+			} else if (route === 'steam://settings/system') {
+				// The ingestion's "settings" dialog IS Settings("System") --
+				// the same page Steam's own in-game SystemUpdate click opens.
+				opened = openDialogInOverlay(appid, 'settings');
+			} else {
+				dlog(`click-bridge: unbridgeable route ${route}`);
+				return;
 			}
+			if (!opened) dlog('click-bridge: overlay store not found');
 		} catch (e) {
 			dlog(`click-bridge failed: ${(e as Error)?.message ?? e}`);
 		}

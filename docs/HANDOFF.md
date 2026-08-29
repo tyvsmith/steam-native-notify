@@ -301,13 +301,18 @@ asserts it. Unclicked notifications never touch the `steam` binary at all.
    overlay probes (the synthetic request opened the gifts page in the
    Helldivers 2 overlay): the store owning OnGameOverlayActivateRequested,
    reachable from the shared context, routes bWebPage requests into the
-   overlay navigator. The click bridge now uses it: in-game, notify-action
-   writes openurl routes to RUNTIME_DIR/.click (click_plan "overlay");
-   clickbridge.ts polls TakeClick for 120s after each delivery and opens the
-   URL via overlay.ts. Chat routes still go through `steam` (the client
-   overlays them itself); nav/settings routes are inert in-game (no overlay
-   equivalent). Still to observe: one real end-to-end click through the
-   bridge (desktop notification -> overlay page).
+   overlay navigator. The click bridge uses it: in-game, notify-action
+   writes bridgeable routes to RUNTIME_DIR/.click (click_plan "overlay");
+   clickbridge.ts polls TakeClick for 120s after each delivery and opens
+   them via overlay.ts -- openurl routes as overlay web pages,
+   steam://settings/system as the ingestion's "settings" dialog (hard-wired
+   to Settings("System"), the same page Steam's own in-game SystemUpdate
+   click opens). Chat routes still go through `steam` (the client overlays
+   them itself); nav and settings/controller routes are inert in-game (no
+   overlay equivalent). End-to-end verified 2026-08-29 in Helldivers 2:
+   Gift click -> gifts page in the overlay browser, no focus theft.
+   Bridge triage: every consumed click logs `click-bridge:`; a consumed
+   click with no line after it was the double-parse bug, fixed in c07c4d1.
 5. **The popup is the whole click window.** quickshell 1.2 expires the popup
    after ~8s despite `-t 0` and the action dies with it (the notification
    centre copy is inert). Orthogonal to routing, but it bounds how a click can

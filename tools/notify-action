@@ -149,7 +149,11 @@ click_plan() {
 	case ${1:-} in
 	"") echo none ;;
 	steam://friends/message/*) echo route ;;
-	steam://openurl/*) game_running && echo overlay || echo activate+route ;;
+	# settings/system rides the bridge too: the overlay ingestion's
+	# "settings" dialog is Settings("System"), the same page Steam's own
+	# in-game SystemUpdate click opens. settings/controller and nav routes
+	# have no overlay equivalent, so in-game they stay inert.
+	steam://openurl/* | steam://settings/system) game_running && echo overlay || echo activate+route ;;
 	*) game_running && echo none || echo activate+route ;;
 	esac
 }

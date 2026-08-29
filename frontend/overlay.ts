@@ -53,21 +53,35 @@ export async function runningOverlayAppId(): Promise<number | null> {
 	}
 }
 
-/** Open a web page in the running game's overlay browser. */
-export function openInOverlay(appid: number, url: string): boolean {
+function sendOverlayRequest(appid: number, bWebPage: boolean, strDialog: string): boolean {
 	const store = findOverlayStore();
 	if (!store) return false;
 	const request = {
 		unRequestingAppID: appid,
 		appid,
-		bWebPage: true,
-		strDialog: url,
+		bWebPage,
+		strDialog,
 		eWebPageMode: 0 /* Default: non-modal, RouteNavigateToSteamWeb */,
 		steamidTarget: '0',
 		eFlag: 0 /* OverlayToStoreFlag_None */,
 		strConnectString: '',
 	};
-	dlog(`overlay: open appid=${appid} ${safeJson(url)}`);
+	dlog(`overlay: open appid=${appid} ${safeJson(strDialog)}`);
 	store.OnGameOverlayActivateRequested(request);
 	return true;
+}
+
+/** Open a web page in the running game's overlay browser. */
+export function openInOverlay(appid: number, url: string): boolean {
+	return sendOverlayRequest(appid, true, url);
+}
+
+/**
+ * Open one of the handler's named dialogs in the overlay -- the SDK's
+ * ActivateGameOverlay vocabulary ("settings", "friends", "community", ...).
+ * Note "settings" is hard-wired to Settings("System") in the handler, which
+ * is exactly where a SystemUpdate click goes.
+ */
+export function openDialogInOverlay(appid: number, dialog: string): boolean {
+	return sendOverlayRequest(appid, false, dialog);
 }

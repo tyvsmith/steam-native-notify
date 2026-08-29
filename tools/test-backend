@@ -251,8 +251,9 @@ check("click plan: openurl route activates first", click_plan("steam://openurl/h
 check("click plan: settings route activates first", click_plan("steam://settings/system") == "activate+route")
 check("click plan: no route does nothing", click_plan("") == "none")
 check("click plan: in-game openurl route goes to the overlay bridge", click_plan("steam://openurl/https://steamcommunity.com/x", "yes") == "overlay")
+check("click plan: in-game system settings goes to the overlay bridge", click_plan("steam://settings/system", "yes") == "overlay")
 check("click plan: in-game nav route is inert", click_plan("steam://nav/games/details/570", "yes") == "none")
-check("click plan: in-game settings route is inert", click_plan("steam://settings/system", "yes") == "none")
+check("click plan: in-game controller settings is inert", click_plan("steam://settings/controller", "yes") == "none")
 check("click plan: in-game chat route unchanged", click_plan("steam://friends/message/76561198000000000", "yes") == "route")
 
 -- notify-action's markup escaping: the daemon parses the body as markup, so
