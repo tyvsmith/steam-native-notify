@@ -37,9 +37,9 @@ export function SettingsPanel() {
 			<ToggleField
 				label="Keep Steam's own toasts while in a game"
 				description={
-					'While a game is running, Steam’s in-game toast is left as-is and no ' +
-					'desktop notification is sent. Out of a game, desktop notifications ' +
-					'work as normal.'
+					'While a game has focus, Steam shows its own in-game toast and no ' +
+					'desktop notification is sent. With the game unfocused or closed, ' +
+					'desktop notifications work as normal.'
 				}
 				checked={nativeInGame}
 				onChange={(value: boolean) => {
