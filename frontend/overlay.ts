@@ -115,6 +115,49 @@ export function openChatOnDesktop(steamid64: string): boolean {
 	return sendOverlayRequest(0, false, 'chat', steamid64);
 }
 
+/**
+ * The FriendsUI dispatcher the ingestion's chat case calls into; it also
+ * carries ShowChatRoomGroupDialog, which is Steam's own GroupChatMessage
+ * toast click: LN.ShowChatRoomGroupDialog(browserInfo, chat_group_id,
+ * chat_id). No URL reaches the room dialog; this does.
+ */
+let chatDispatcher: any;
+
+function findChatDispatcher(): any {
+	if (chatDispatcher) return chatDispatcher;
+	try {
+		chatDispatcher = findModuleExport((e: any) => {
+			try {
+				return (
+					typeof e?.ShowChatRoomGroupDialog === 'function' &&
+					typeof e?.ShowFriendChatDialog === 'function'
+				);
+			} catch {
+				return false;
+			}
+		});
+	} catch (e) {
+		dlog(`chat dispatcher lookup failed: ${(e as Error)?.message ?? e}`);
+	}
+	return chatDispatcher;
+}
+
+/** Open a group chat room dialog on the surface for appid (0 = desktop). */
+export function openChatRoomDialog(appid: number, groupId: string, chatId: string): boolean {
+	const store = findOverlayStore();
+	const friends = findChatDispatcher();
+	if (!store || !friends) return false;
+	try {
+		const instance = store.GetInstanceForAppID(appid);
+		dlog(`overlay: chat room appid=${appid} group=${groupId} chat=${chatId}`);
+		friends.ShowChatRoomGroupDialog(instance, groupId, chatId);
+		return true;
+	} catch (e) {
+		dlog(`overlay: chat room failed: ${(e as Error)?.message ?? e}`);
+		return false;
+	}
+}
+
 /** Open a web page in the running game's overlay browser. */
 export function openInOverlay(appid: number, url: string): boolean {
 	return sendOverlayRequest(appid, true, url);

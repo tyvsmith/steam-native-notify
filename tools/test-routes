@@ -211,6 +211,8 @@ is('a window with no fiber yields null', notification.notificationFromToast(toas
 is('screenshot with a handle names the item', routes.clientOverlayAction(14, { screenshot_handle: 'h123' }), 'screenshot:h123');
 is('screenshot without a handle falls back to the grid', routes.clientOverlayAction(14, {}), 'media');
 is('playtime warning names the dialog', routes.clientOverlayAction(45, {}), 'requestplaytime');
+is('group chat message names the room', routes.clientOverlayAction(9, { chat_group_id: '72124602', chat_id: '298064531' }), 'chatroom:72124602:298064531');
+is('group chat message without coordinates stays null', routes.clientOverlayAction(9, {}), null);
 is('finished recording names the clip', routes.clientOverlayAction(56, { clip_id: 'clip_1' }), 'clip:clip_1');
 is('instant clip without an id falls back to the grid', routes.clientOverlayAction(58, {}), 'media');
 is('routed types carry no action token', routes.clientOverlayAction(1, { appid: 570 }), null);

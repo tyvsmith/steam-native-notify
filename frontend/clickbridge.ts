@@ -3,6 +3,7 @@ import { dlog } from './log';
 import {
 	openChatInOverlay,
 	openChatOnDesktop,
+	openChatRoomDialog,
 	openClipInOverlay,
 	openDialogInOverlay,
 	openInOverlay,
@@ -88,10 +89,19 @@ function afterMainWindow(fn: () => void): void {
  * fix). Steam's own desktop clicks for these types open the media page and
  * the playtime dialog in the main window, so inert was the wrong mirror.
  */
+function chatRoomParts(route: string): [string, string] | null {
+	const parts = route.slice('action:chatroom:'.length).split(':');
+	return parts.length === 2 && parts[0] && parts[1] ? [parts[0], parts[1]] : null;
+}
+
 function desktopAction(route: string): void {
 	afterMainWindow(() => {
 		let opened: boolean;
-		if (route.startsWith('action:screenshot:')) {
+		if (route.startsWith('action:chatroom:')) {
+			const parts = chatRoomParts(route);
+			if (!parts) return;
+			opened = openChatRoomDialog(0, parts[0], parts[1]);
+		} else if (route.startsWith('action:screenshot:')) {
 			opened = openScreenshotInOverlay(0, route.slice('action:screenshot:'.length));
 		} else if (route.startsWith('action:clip:')) {
 			opened = openClipInOverlay(0, route.slice('action:clip:'.length));
@@ -187,6 +197,11 @@ export function armClickBridge(): void {
 				// SystemUpdate and HardwareUpdate (observed 2026-08-29), so
 				// both settings routes map here.
 				opened = openDialogInOverlay(appid, 'settings');
+			} else if (route.startsWith('action:chatroom:')) {
+				// GroupChatMessage: the room dialog, on the overlay surface.
+				const parts = chatRoomParts(route);
+				if (!parts) return;
+				opened = openChatRoomDialog(appid, parts[0], parts[1]);
 			} else if (route.startsWith('action:screenshot:')) {
 				// Screenshot with its handle: the specific item, where Steam's
 				// own in-game click goes.
