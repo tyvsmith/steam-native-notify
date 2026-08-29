@@ -1,4 +1,4 @@
-import { callable, definePlugin, IconsModule } from '@steambrew/client';
+import { callable, definePlugin, IconsModule } from 'millennium';
 import { typeName } from './generated/notifications';
 import { clientRoute, serverRoute } from './routes';
 import { notificationFromToast, type DecodedNotification } from './notification';

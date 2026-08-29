@@ -1,24 +1,9 @@
-import { DialogControlsSection, ToggleField } from '@steambrew/client';
+import { DialogControlsSection, ToggleField } from 'millennium';
 import { loadSettings, settings, updateSettings } from './settings';
 
-declare global {
-	interface Window {
-		SP_REACT: {
-			useState: <T>(initial: T | (() => T)) => [T, (value: T | ((prev: T) => T)) => void];
-			useEffect: (cb: () => void | (() => void), deps?: unknown[]) => void;
-			createElement: unknown;
-			Fragment: unknown;
-		};
-	}
-	// JSX compiles through window.SP_REACT.createElement, so host elements need
-	// this stub to satisfy the type checker.
-	namespace JSX {
-		interface IntrinsicElements {
-			[elem: string]: any;
-		}
-	}
-}
-
+// window.SP_REACT is Steam's own React, typed by the millennium SDK as
+// `typeof React`; JSX itself compiles through the automatic runtime, which the
+// bundler maps onto Steam's JSX factory (window.SP_JSX_FACTORY).
 export function SettingsPanel() {
 	const { useState, useEffect } = window.SP_REACT;
 	const [hide, setHide] = useState(settings().hideSteamToast);
@@ -50,7 +35,7 @@ export function SettingsPanel() {
 			<ToggleField
 				label="Accept test commands from tools/fire"
 				description={
-					'Developer aid: lets the tools/fire script in the plugin directory push ' +
+					'Developer aid: lets the tools/fire script in the plugin repository push ' +
 					'synthesized test notifications through Steam’s own pipeline. Leave off ' +
 					'unless you are working on the plugin.'
 				}

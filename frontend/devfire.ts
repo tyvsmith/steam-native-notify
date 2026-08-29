@@ -1,4 +1,4 @@
-import { callable, findModuleExport } from '@steambrew/client';
+import { callable, findModuleExport } from 'millennium';
 import { dlog, safeJson } from './log';
 import { parseCallableJson, settings } from './settings';
 
@@ -12,7 +12,7 @@ import { parseCallableJson, settings } from './settings';
  * synthetic server rollup for injection.
  *
  * This is a name-and-args door into Steam's stores for anything that can write
- * the plugin directory, so it is OFF by default and gated on the devFire
+ * the plugin's cache directory, so it is OFF by default and gated on the devFire
  * setting -- checked per tick, so the settings toggle takes effect without a
  * restart, and a disabled gate costs one boolean read every 3s.
  */

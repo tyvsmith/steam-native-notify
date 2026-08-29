@@ -1,28 +1,26 @@
 {
-	"name": "steam-native-notify",
-	"version": "0.1.0",
-	"description": "Mirror Steam notification toasts to the desktop notification daemon.",
-	"license": "MIT",
-	"author": "Ty Smith",
-	"private": true,
-	"type": "module",
-	"main": "./frontend/index.tsx",
-	"engines": {
-		"node": ">=18"
-	},
-	"scripts": {
-		"dev": "millennium-ttc --build dev",
-		"build": "node tools/gen-proto.mjs && tsc --noEmit && millennium-ttc --build prod",
-		"gen": "node tools/gen-proto.mjs",
-		"proto:check": "node tools/proto-sync.mjs --check",
-		"proto:update": "node tools/proto-sync.mjs --update",
-		"gen:table": "node tools/gen-types-table.mjs",
-		"typecheck": "tsc --noEmit",
-		"test": "tools/test-backend && node tools/test-routes"
-	},
-	"devDependencies": {
-		"@steambrew/client": "^5.5.14",
-		"@steambrew/ttc": "^2.7.5",
-		"typescript": "^5.7.2"
-	}
+  "name": "steam-native-notify",
+  "version": "0.1.0",
+  "description": "Mirror Steam notification toasts to the desktop notification daemon.",
+  "license": "MIT",
+  "author": "Ty Smith",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "starlight watch",
+    "build": "bun tools/gen-proto.mjs && tsc --noEmit && starlight pack",
+    "gen": "bun tools/gen-proto.mjs",
+    "proto:check": "bun tools/proto-sync.mjs --check",
+    "proto:update": "bun tools/proto-sync.mjs --update",
+    "gen:table": "bun tools/gen-types-table.mjs",
+    "typecheck": "tsc --noEmit",
+    "prepare": "starlight lsp",
+    "test": "tools/test-backend && bun tools/test-routes"
+  },
+  "devDependencies": {
+    "@steambrew/starlight": "^1.1.4",
+    "@types/react": "19.1.1",
+    "@types/react-dom": "19.1.1",
+    "typescript": "^5.7.2"
+  }
 }

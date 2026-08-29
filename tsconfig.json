@@ -1,24 +1,34 @@
 {
-	"compilerOptions": {
-		"outDir": ".millennium/Dist",
-		"rootDir": "frontend",
-		"module": "ESNext",
-		"moduleResolution": "bundler",
-		"target": "ES2020",
-		"jsx": "react",
-		"jsxFactory": "window.SP_REACT.createElement",
-		"jsxFragmentFactory": "window.SP_REACT.Fragment",
-		"declaration": false,
-		"noUnusedLocals": true,
-		"noUnusedParameters": true,
-		"esModuleInterop": true,
-		"noImplicitReturns": true,
-		"noImplicitThis": true,
-		"noImplicitAny": true,
-		"allowSyntheticDefaultImports": true,
-		"skipLibCheck": true,
-		"resolveJsonModule": true
-	},
-	"include": ["frontend"],
-	"exclude": ["node_modules"]
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ES2020",
+    "jsx": "react-jsx",
+    "declaration": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "esModuleInterop": true,
+    "noImplicitReturns": true,
+    "noImplicitThis": true,
+    "noImplicitAny": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "millennium": [
+        ".millennium/lsp/ts"
+      ]
+    },
+    "typeRoots": [
+      ".millennium/types",
+      "node_modules/@types"
+    ]
+  },
+  "include": [
+    "frontend"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

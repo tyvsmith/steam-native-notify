@@ -1,0 +1,27 @@
+[plugin]
+id = "me.tysmith.steam-native-notify"
+name = "Steam Native Notify"
+version = "0.1.0"
+author = "Ty Smith"
+description = "Mirrors Steam's in-client notification toasts to the desktop notification daemon via notify-send."
+
+[assets]
+# The backend materializes tools/notify-action out of the .star at load
+# (backend/main.lua, install_helper); a .star is never unpacked on disk.
+resources = ["tools/notify-action"]
+
+[backend]
+entry = "backend/main.lua"
+sources = ["backend/**/*.lua"]
+
+[frontend]
+entry = "frontend/index.tsx"
+
+# No [webkit]: this plugin has no business in store/community pages.
+# No [dev]: pack would otherwise poke plugin.restart over MEP after every
+# build, and a backend restart mid-verification muddies tools/capture.
+
+[compiler]
+# "auto" resolves to ~/.local/share/millennium/plugins/<id>.star, so building
+# IS installing; there is no separate install step.
+output_path = "auto"

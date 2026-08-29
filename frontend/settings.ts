@@ -1,8 +1,8 @@
-import { callable } from '@steambrew/client';
+import { callable } from 'millennium';
 
 /**
- * Settings live in the backend because this SDK build does not export
- * pluginConfig to the frontend; Lua's millennium.config does the persisting.
+ * Settings live in the backend; Lua's millennium.config does the persisting.
+ * The frontend never learns where they are stored.
  */
 const loadSettingsRaw = callable<[], string>('LoadSettings');
 const saveSettingsRaw = callable<[{ payload: string }], string>('SaveSettings');
@@ -12,8 +12,8 @@ export interface Settings {
 	hideSteamToast: boolean;
 	/**
 	 * Accept commands from tools/fire (devfire.ts). A name-and-args door into
-	 * Steam's notification stores for anything that can write the plugin
-	 * directory, so it ships off.
+	 * Steam's notification stores for anything that can write the command file
+	 * in the plugin's cache directory, so it ships off.
 	 */
 	devFire: boolean;
 }

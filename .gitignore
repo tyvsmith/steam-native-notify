@@ -4,4 +4,4 @@ node_modules/
 __pycache__/
 *.pyc
 .omc/
-.dev-fire
+.millennium/lsp/

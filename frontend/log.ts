@@ -1,4 +1,4 @@
-import { callable } from '@steambrew/client';
+import { callable } from 'millennium';
 
 /**
  * Diagnostics for the whole frontend, kept out of index so any module can log
