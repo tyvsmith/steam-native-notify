@@ -83,6 +83,22 @@ if [[ $1 == --overlay-media ]]; then
   exit 0
 fi
 
+# Click-replay experiment probes (docs/experiments/click-replay.md):
+#   tools/fire --replay inspect          dump the stashed handler candidates
+#   tools/fire --replay invoke [name]    invoke a stashed handler (latest if
+#                                        no toast name is given)
+if [[ $1 == --replay ]]; then
+  call="${2:?--replay needs a call (inspect or invoke)}"
+  name="${3:-}"
+  if [[ -n $name ]]; then
+    printf '{"replay":{"call":"%s","name":"%s"}}\n' "$call" "$name" >"$RUNTIME_DIR/.dev-fire"
+  else
+    printf '{"replay":{"call":"%s"}}\n' "$call" >"$RUNTIME_DIR/.dev-fire"
+  fi
+  echo "queued: replay $call ${name:-'(latest)'}  (result lands in the plugin log)"
+  exit 0
+fi
+
 if [[ $1 == --server ]]; then
   type="${2:?--server needs a numeric ESteamNotificationType}"
   body="${3:-{\}}"

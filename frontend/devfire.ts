@@ -2,6 +2,7 @@ import { callable, findModuleExport } from 'millennium';
 import { dlog, safeJson } from './log';
 import { parseCallableJson, settings } from './settings';
 import { openDialogInOverlay, openInOverlay, openMediaInOverlay } from './overlay';
+import { inspectReplayStash, invokeReplayHandler } from './replay';
 
 /**
  * The tools/fire door: dev machinery, fenced off from the capture path.
@@ -142,10 +143,19 @@ export function startDevFirePoll(): void {
 				args?: unknown[];
 				server?: { type: number; body?: unknown };
 				overlay?: { call?: string; appid?: number; url?: string };
+				replay?: { call?: string; name?: string };
 			} | null>(raw, null);
 			if (!cmd) return;
 			if (cmd.overlay) {
 				void runOverlayProbe(cmd.overlay);
+				return;
+			}
+			// Experiment probe (docs/experiments/click-replay.md): inspect the
+			// handler stash or invoke a stashed handler. Both never throw.
+			if (cmd.replay) {
+				if (cmd.replay.call === 'inspect') inspectReplayStash();
+				else if (cmd.replay.call === 'invoke') invokeReplayHandler(cmd.replay.name);
+				else dlog(`replay: unknown call ${String(cmd.replay.call)}`);
 				return;
 			}
 			if (cmd.server && typeof cmd.server.type === 'number') {

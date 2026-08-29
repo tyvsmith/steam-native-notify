@@ -8,6 +8,7 @@ import { dlog, safeJson } from './log';
 import { armClickBridge } from './clickbridge';
 import { rememberToastContext, trackOverlayFocus } from './overlay';
 import { startDevFirePoll } from './devfire';
+import { stashReplayCandidates } from './replay';
 import { SettingsPanel } from './Settings';
 import { loadSettings, parseCallableJson, settings } from './settings';
 
@@ -163,6 +164,9 @@ function deliverToast(win: Window, name: string, text: string): void {
 	// The walk also surfaces the toast's per-surface browserInfo, which the
 	// chat dialogs key on; stash it for the click bridge (overlay.ts).
 	rememberToastContext(overlayCtx, takeToastBrowserInfo());
+	// Experiment probe (docs/experiments/click-replay.md): stash the toast's
+	// own click handler before the popup can be closed. Never throws.
+	stashReplayCandidates(win, name);
 
 	let route: string | null = null;
 	let ingame: string | null = null;
