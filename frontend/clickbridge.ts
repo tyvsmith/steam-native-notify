@@ -46,7 +46,13 @@ let timer: number | null = null;
  * URL executor. Action tokens have no desktop behavior by analysis, so they
  * end here.
  */
-function raiseMainWindow(): void {
+/**
+ * Raise the main window if it exists; closed to the tray, its popup is
+ * destroyed and the appid-0 instance has no surface, so it is opened first
+ * through the client's own URL executor (steam://open/main -- the same thing
+ * launcher activation does). Returns true when the window already existed.
+ */
+function ensureMainWindow(): boolean {
 	try {
 		const mgr: any = Reflect.get(globalThis, 'g_PopupManager');
 		const popups: Iterable<any> = mgr?.m_mapPopups?.values?.() ?? [];
@@ -54,12 +60,26 @@ function raiseMainWindow(): void {
 			const win = popup?.window ?? popup?.m_popup;
 			if (typeof win?.name === 'string' && win.name.startsWith('SP Desktop')) {
 				win.SteamClient?.Window?.BringToFront?.();
-				break;
+				return true;
 			}
 		}
 	} catch (e) {
 		dlog(`click-bridge: raise failed: ${(e as Error)?.message ?? e}`);
 	}
+	try {
+		dlog('click-bridge: main window closed; opening it');
+		const sc: any = Reflect.get(globalThis, 'SteamClient');
+		sc?.URL?.ExecuteSteamURL?.('steam://open/main');
+	} catch (e) {
+		dlog(`click-bridge: open main failed: ${(e as Error)?.message ?? e}`);
+	}
+	return false;
+}
+
+/** Run a desktop door once the main window is up (freshly created needs to settle). */
+function afterMainWindow(fn: () => void): void {
+	const existed = ensureMainWindow();
+	window.setTimeout(fn, existed ? 300 : 1500);
 }
 
 /**
@@ -69,21 +89,22 @@ function raiseMainWindow(): void {
  * the playtime dialog in the main window, so inert was the wrong mirror.
  */
 function desktopAction(route: string): void {
-	raiseMainWindow();
-	let opened: boolean;
-	if (route.startsWith('action:screenshot:')) {
-		opened = openScreenshotInOverlay(0, route.slice('action:screenshot:'.length));
-	} else if (route.startsWith('action:clip:')) {
-		opened = openClipInOverlay(0, route.slice('action:clip:'.length));
-	} else if (route === 'action:media') {
-		opened = openMediaInOverlay(0);
-	} else if (route === 'action:requestplaytime') {
-		opened = openPlaytimeDialog(0);
-	} else {
-		dlog(`click-bridge: unbridgeable action ${route}`);
-		return;
-	}
-	if (!opened) dlog('click-bridge: desktop door failed');
+	afterMainWindow(() => {
+		let opened: boolean;
+		if (route.startsWith('action:screenshot:')) {
+			opened = openScreenshotInOverlay(0, route.slice('action:screenshot:'.length));
+		} else if (route.startsWith('action:clip:')) {
+			opened = openClipInOverlay(0, route.slice('action:clip:'.length));
+		} else if (route === 'action:media') {
+			opened = openMediaInOverlay(0);
+		} else if (route === 'action:requestplaytime') {
+			opened = openPlaytimeDialog(0);
+		} else {
+			dlog(`click-bridge: unbridgeable action ${route}`);
+			return;
+		}
+		if (!opened) dlog('click-bridge: desktop door failed');
+	});
 }
 
 function desktopClick(route: string): void {
@@ -91,10 +112,10 @@ function desktopClick(route: string): void {
 		desktopAction(route);
 		return;
 	}
-	raiseMainWindow();
-	// Navigate after the raise has landed: the focus shift is what makes the
-	// client's own handlers (chat especially) pick the desktop surface.
-	window.setTimeout(() => {
+	// Navigate after the raise (or creation) has landed: the focus shift is
+	// what makes the client's own handlers (chat especially) pick the desktop
+	// surface.
+	afterMainWindow(() => {
 		try {
 			const sc: any = Reflect.get(globalThis, 'SteamClient');
 			dlog(`click-bridge: desktop ${route}`);
@@ -102,7 +123,7 @@ function desktopClick(route: string): void {
 		} catch (e) {
 			dlog(`click-bridge: navigate failed: ${(e as Error)?.message ?? e}`);
 		}
-	}, 300);
+	});
 }
 
 export function armClickBridge(): void {
@@ -138,8 +159,9 @@ export function armClickBridge(): void {
 				} else if (appid !== null) {
 					// Game running but unfocused: the desktop instance,
 					// explicitly (the URL handler would pick the overlay).
-					raiseMainWindow();
-					if (!openChatOnDesktop(sid)) dlog('click-bridge: overlay door failed');
+					afterMainWindow(() => {
+						if (!openChatOnDesktop(sid)) dlog('click-bridge: overlay door failed');
+					});
 				} else {
 					// No game at all: the URL handler is the proven desktop
 					// path.
