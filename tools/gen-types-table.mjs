@@ -90,10 +90,10 @@ const CATALOG = {
 	LowBattery: { steam: 'dismiss only', route: 'none' },
 	SystemUpdate: { steam: 'Settings → System', route: '`steam://settings/system`' },
 	FriendMessage: { steam: 'chat dialog with the sender', route: '`steam://friends/message/<steamid>`', observed: true },
-	GroupChatMessage: { steam: 'that chat room’s dialog', route: 'none — no steam:// entry point reaches the room dialog' },
+	GroupChatMessage: { steam: 'that chat room’s dialog', route: 'none as a URL — the click bridge opens the room dialog (`chat_group_id` + `chat_id`)' },
 	FriendInviteRollup: { steam: 'pending-invites dialog', route: '`steam://openurl/` + pending invites page' },
 	FamilySharingStopPlaying: { steam: 'nothing', route: 'none' },
-	Screenshot: { steam: 'that screenshot in the Media dialog', route: 'none — Media dialogs have no URL' },
+	Screenshot: { steam: 'that screenshot in the Media dialog', route: 'none as a URL — the click bridge opens that screenshot (`screenshot_handle`; the media grid without one)' },
 	CloudSyncFailure: { steam: 'library page for the game', route: '`steam://nav/games/details/<appid>`' },
 	CloudSyncConflict: { steam: 'library page for the game', route: '`steam://nav/games/details/<appid>`' },
 	IncomingVoiceChat: { steam: 'chat dialog; does not accept the call', route: '`steam://friends/message/<steamid>`', observed: true },
@@ -124,7 +124,7 @@ const CATALOG = {
 	RemoteClientStartStream: { steam: 'nothing', route: 'none' },
 	StreamingClientConnection: { steam: 'nothing', route: 'none' },
 	FamilyInvite: { steam: 'family join page for that invite', route: '`steam://openurl/` + join page', serverType: 16 },
-	PlaytimeWarning: { steam: 'playtime dialog', route: 'none' },
+	PlaytimeWarning: { steam: 'playtime dialog', route: 'none as a URL — the click bridge opens the playtime request dialog' },
 	FamilyPurchaseRequest: { steam: 'family management, requests tab', route: '`steam://openurl/` + requests tab', serverType: 17 },
 	FamilyPurchaseRequestResponse: { steam: 'family management, requests tab', route: '`steam://openurl/` + requests tab', serverType: 19 },
 	ParentalFeatureRequest: { steam: 'family management, requests tab', route: '`steam://openurl/` + requests tab', serverType: 15 },
@@ -135,9 +135,9 @@ const CATALOG = {
 	RequestedGameAdded: { steam: 'library page after a package→app lookup', route: 'none — lookup unavailable here', serverType: 22 },
 	ClipDownloaded: { steam: 'that clip in the Media dialog', route: 'none — Media dialogs have no URL', serverType: 24 },
 	GameRecordingStart: { steam: 'explicit no-op', route: 'none' },
-	GameRecordingStop: { steam: 'that clip in the Media dialog', route: 'none — Media dialogs have no URL' },
+	GameRecordingStop: { steam: 'that clip in the Media dialog', route: 'none as a URL — the click bridge opens that clip (`clip_id`; the media grid without one)' },
 	GameRecordingUserMarkerAdded: { steam: 'explicit no-op', route: 'none' },
-	GameRecordingInstantClip: { steam: 'that clip in the Media dialog', route: 'none — Media dialogs have no URL' },
+	GameRecordingInstantClip: { steam: 'that clip in the Media dialog', route: 'none as a URL — the click bridge opens that clip (`clip_id`; the media grid without one)' },
 	PlaytestInvite: { steam: 'gated-access page for the app', route: '`steam://openurl/` + gated-access page', serverType: 28 },
 	TradeReversal: { steam: 'your trade history page', route: '`steam://openurl/` + trade history', serverType: 29 },
 	HardwareUpdateAvailable: { steam: 'Settings → Controller (desktop)', route: '`steam://settings/controller`' },
@@ -192,7 +192,10 @@ routing rules, not counted by hand.
 
 - **${routed}** types route.
 - **${inert}** types are inert in Steam itself: a click only dismisses, and so does ours.
-- The remainder open dialogs no URL can reach, so their clicks stay inert here.
+- The remainder open dialogs no URL can reach. Five of them (the chat room,
+  media items, the playtime dialog) act anyway: the click bridge opens the same
+  dialog through Steam's own doors, on whichever surface is focused. The rest
+  stay inert here too.
 - "server" types arrive from the web notification system; their payload is
   \`body_data\` JSON on the toast's React object, not a client protobuf.
 

@@ -103,15 +103,68 @@ codebase is the *gamepad* navigator's `beforeNavigate`, guarded by "no window
 focused". Steam's desktop code never needed focus because its toasts are only
 clickable while Steam is already focused.
 
-`steam://open/main` is not handled by the current client (tested: no effect).
-The window-manager-agnostic raise is the launcher-activation path: an argless
-`steam` invocation while the client runs makes it show and focus its main
-window itself (tested: focus moved to Steam). The wrapper translates the bare
-launch into `steam -foreground` for the running instance — console_log shows
-`ExecCommandLine: ... '-foreground'` — so the mechanism is Steam's own named
-bring-to-front command. `tools/notify-action` sequences it before non-chat
-routes, on click only; a clicked test toast produced `-foreground` followed one
-second later by the route.
+`steam://open/main` invoked *externally* is not handled by the current client
+(tested: no effect). From *inside* the client it works:
+`SteamClient.URL.ExecuteSteamURL("steam://open/main")` creates the main window
+when it is closed to the tray (verified 2026-08-29), and an existing main
+window raises via its own popup's `SteamClient.Window.BringToFront` — the same
+self-raise the launcher-activation path uses. That external activation path
+(an argless `steam` invocation becomes `steam -foreground` for the running
+instance) was this plugin's original raise mechanism and still works, but the
+click path no longer uses it: every click is executed from inside the client
+by the click bridge, which raises or creates the window itself.
+
+## The overlay and the surface doors
+
+Where a click lands depends on which surface the user occupies, and Steam
+decides that itself: each toast renders in the user's current surface —
+overlay-context popup names are `notificationtoasts_uid<appid>-...`, desktop
+ones `notificationtoasts_<N>_desktop` — and Steam's own click follows the same
+decision (observed 2026-08-29, Helldivers 2: overlay-context clicks stay in
+the overlay; a desktop-context click opens the client window even while a game
+runs unfocused).
+
+**No external `steam://` URL reaches the overlay browser.** The documented
+`steam://overlay` command is gone from current binaries; an externally invoked
+`steam://openexternalforpid` never reaches its JS handler (the client raises
+its main window over the game instead); even a bare `steam://openurl/`
+navigates the desktop client and raises it over the game. The overlay is
+driven from inside the shared JS context, through these doors (all verified
+live 2026-08-29, and all minified surfaces that reshuffle across builds):
+
+- **Activate-overlay ingestion**: the store registering
+  `SteamClient.Overlay.RegisterForActivateOverlayRequests` (found by webpack
+  export search for `OnGameOverlayActivateRequested` +
+  `OnSteamURLOpenExternalForPID`). `OnGameOverlayActivateRequested` with
+  `bWebPage: true` routes into the overlay navigator
+  (`RouteNavigateToSteamWeb` → `GetInstanceForAppID(appid).NavigateToSteamWeb`);
+  the request shape is the one the bundle's own `steam://openexternalforpid`
+  parser builds. With `bWebPage: false`, `strDialog` names an SDK
+  ActivateGameOverlay dialog: `"settings"` is hard-wired to
+  `Settings("System")` (exactly where Steam's own in-game SystemUpdate AND
+  HardwareUpdate clicks land), `"chat"` with `steamidTarget` opens the 1:1
+  chat. `appid: 0` resolves the *desktop* instance through the same
+  `GetInstanceForAppID`, so one door serves both surfaces.
+- **The per-surface navigator**: `store.GetNavigator({ unRequestingAppID })`
+  yields the surface's navigator for what the ingestion has no case for:
+  `Media.Screenshot({state:{id}})`, `Media.Clip({state:{id}})`,
+  `Media.Grid()`, `RequestPlaytimeDialog("manual")` — each the call Steam's
+  own toast click makes. The appid-0 ingestion cannot render
+  `requestplaytime`; the navigator door is the one that works on both
+  surfaces.
+- **The FriendsUI dispatcher** (export search for `ShowChatRoomGroupDialog` +
+  `ShowFriendChatDialog`): `ShowChatRoomGroupDialog(browserInfo,
+  chat_group_id, chat_id)` is Steam's own GroupChatMessage click; no URL
+  reaches the room dialog. The `browserInfo` must be a toast popup's own
+  `params.browserInfo`, read from a provider *above* the notification fiber in
+  the toast's React tree (the popup object does not carry it, and instance
+  objects are NOT valid browserInfo): the dialog is keyed on its `m_unPID`,
+  and a wrong object opens on the wrong surface and never reuses an existing
+  window.
+- **Live game focus**:
+  `SteamClient.System.UI.RegisterForOverlayGameWindowFocusChanged` is the
+  client's own focus signal; the appid whose overlay exists comes from
+  `SteamClient.Overlay.GetOverlayBrowserInfo()`.
 
 ## Catalog: client-sourced types (`eSource=1`)
 
@@ -127,10 +180,10 @@ second later by the route.
 | 6 | LowBattery | dismiss only (`bt`) | none |
 | 7 | SystemUpdate | `Settings("System")` (`vt`) | `steam://settings/system` |
 | 8 | FriendMessage | `ShowFriendChatDialog(steamid)` (`Rt`; observed). `response_steamurl`, when non-empty, backs only the tray options button and the gamepad "Accept" menu via `OpenURLInClient` — not the desktop body click | `steam://friends/message/<steamid>` |
-| 9 | GroupChatMessage | `ShowChatRoomGroupDialog(chat_group_id, chat_id)` (`Tt`) | none — no `steam://` entry point reaches that dialog (FriendsUI registers only `friends/message` and `friends/joinchat`, both steamid-keyed). Routing to the sender's 1:1 chat would be a different action, so it was removed |
+| 9 | GroupChatMessage | `ShowChatRoomGroupDialog(chat_group_id, chat_id)` (`Tt`) | none as a URL — no `steam://` entry point reaches that dialog (FriendsUI registers only `friends/message` and `friends/joinchat`, both steamid-keyed). The click bridge makes the same dispatcher call on the clicked surface ("The overlay and the surface doors") |
 | 10 | FriendInviteRollup | `ShowInvitesDialog` (`jt`) | `steam://openurl/<community>profiles/<me64>/friends/pending` — the same destination Steam's *server* FriendInvite component (`Kt`) navigates to on desktop; the dialog itself has no URL |
 | 12 | FamilySharingStopPlaying | none (`kt`) | none |
-| 14 | Screenshot | `nav.Media.Screenshot({id})` (`ot`) | none — Media item dialogs have no URL; `steam://open/screenshots` is registered for the gamepad UI mode only |
+| 14 | Screenshot | `nav.Media.Screenshot({id})` (`ot`) | none as a URL — Media item dialogs have no URL; `steam://open/screenshots` is registered for the gamepad UI mode only. The click bridge makes the same navigator call with `screenshot_handle` (the media grid when the handle is missing) |
 | 15 | CloudSyncFailure | `nav.App(appid)` (`ct`) | `steam://nav/games/details/<appid>` |
 | 16 | CloudSyncConflict | `nav.App(appid)` (`dt`) | `steam://nav/games/details/<appid>` |
 | 17 | IncomingVoiceChat | desktop: `ShowFriendChatDialog(steamid)` (`gt`; observed — opens chat, does not accept) | `steam://friends/message/<steamid>` |
@@ -148,9 +201,9 @@ second later by the route.
 | 38 | TimerExpired | explicit no-op (`Ut`) | none |
 | 40 | SteamInputActionSetChanged | none (`Jt`) | none |
 | 41–43 | RemoteClient*/StreamingClient | none (`$t`,`er`,`tr`) | none |
-| 45 | PlaytimeWarning | `RequestPlaytimeDialog` (`Yt`) | none |
+| 45 | PlaytimeWarning | `RequestPlaytimeDialog` (`Yt`) | none as a URL — the click bridge calls `RequestPlaytimeDialog("manual")` on the clicked surface's navigator |
 | 50,55,57 | GameRecording error/start/marker | explicit no-op (`rr`,`ar`,`ir`) | none |
-| 56,58 | GameRecordingStop/InstantClip | `nav.Media.Clip({clip_id})` (`or`,`lr`) | none (no URL for Media dialogs) |
+| 56,58 | GameRecordingStop/InstantClip | `nav.Media.Clip({clip_id})` (`or`,`lr`) | none as a URL — the click bridge makes the same navigator call with `clip_id` (the media grid when it is missing) |
 | 61 | HardwareUpdateAvailable | desktop: `Settings("Controller")`, gamepad: `Settings("System")` (`It`) | `steam://settings/controller` |
 | 62 | ControllerLowBattery | dismiss only (`yt`) | none |
 | 63,64 | ControllerConnected/Disconnected | none (`Bt`,`wt`) | none |

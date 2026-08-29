@@ -1,12 +1,14 @@
 # Handoff
 
 A Millennium plugin that mirrors Steam's in-client notification toasts to the
-desktop notification daemon. Capture, artwork, delivery, routing, and focus all
-work. Routing is built on Steam's own click logic, read out of the shipped UI
-bundle: 31 of 62 types route, the rest are inert in Steam itself or open
-dialogs no URL can reach. The catalog is runtime-verified for ten types across
-both notification systems, including two watched end-to-end clicks; the short
-list of what remains unwatched is at the end of this file.
+desktop notification daemon. Capture, artwork, delivery, routing, and the
+click path all work, on every surface. Routing is built on Steam's own click
+logic, read out of the shipped UI bundle: 31 of 62 types route as URLs, five
+more open Steam's own dialogs through the click bridge, and the rest are inert
+in Steam itself. Every type whose Steam click acts has a working mirror
+in-game, on the desktop with a game running unfocused, from the tray, and with
+no game at all — verified live in Helldivers 2 (2026-08-29). The short list of
+what remains is at the end of this file.
 
 Read `docs/notification-types.md` for the per-type table and
 `docs/steam-routing.md` for the bundle analysis every route cites. This file is
@@ -20,11 +22,15 @@ frontend/notification.ts  React tree -> typed notification (discriminated union)
 frontend/routes.ts        the routing catalog; every rule cites steam-routing.md
 frontend/urlstore.ts      Steam's URL templates via SteamClient.URL.GetSteamURLList
 frontend/identity.ts      the signed-in steamid64, loaded once from the backend
+frontend/overlay.ts       the surface doors: overlay web pages and dialogs, chat
+                          rooms, media items, the playtime dialog, live focus
+frontend/clickbridge.ts   consumes the click file; picks the surface by focus
 frontend/log.ts           dlog/safeJson; its prefixes are tools/capture's grep contract
 frontend/devfire.ts       the tools/fire door, gated on a setting, off by default
 frontend/Settings.tsx     the settings panel; settings.ts persists ONE JSON document
 backend/main.lua          a pure marshaller: JSON in, spawn tools/notify-action
-tools/notify-action       markup escaping, icon resolution, notify-send, click plan
+tools/notify-action       markup escaping, icon resolution, notify-send; a click
+                          writes the click file
 ```
 
 Markup escaping lives in `tools/notify-action`, next to the `notify-send` that
@@ -38,7 +44,130 @@ in `~/.cache/steam-native-notify/plugin.log`, truncated at each backend load:
 Millennium keeps a packed (.star) plugin's logger output in an in-memory
 buffer and never writes it to Steam's console-linux.txt, so backend/main.lua
 mirrors every line there itself. Steam's log still carries Millennium's
-loader lines (capture's freshness stamp).
+loader lines (capture's freshness stamp). The click path adds its own
+`click-bridge:` and `overlay:` lines; the table is under "The click
+architecture" below.
+
+## The click architecture
+
+The pieces landed separately; this is the whole, end to end.
+
+**Steam picks the surface at toast time; the click re-picks at click time.**
+Steam renders each toast in the surface the user occupies: overlay-context
+popups are named `notificationtoasts_uid<appid>-...`, desktop ones
+`notificationtoasts_<N>_desktop`. Both are CEF popups, captured identically.
+Steam's own click follows the same placement (observed 2026-08-29: a
+desktop-context click opens the client window even while a game runs
+unfocused, and overlay-context clicks all stay in the overlay). But placement
+can lag a focus change on this compositor, so the bridge trusts live focus at
+click time, not the toast's context.
+
+**The payload carries five fields**: `title`, `body`, `image`, `route`,
+`ingame`. `route` is the steam:// URL from routes.ts, null when Steam's own
+click has none. `ingame` is an action token (`clientOverlayAction` in
+routes.ts) for the types whose click opens a dialog no URL reaches:
+`chatroom:<group>:<chat>` for GroupChatMessage (9), `screenshot:<handle>`
+falling back to `media` for Screenshot (14), `requestplaytime` for
+PlaytimeWarning (45), and `clip:<clip_id>` falling back to `media` for
+GameRecordingStop/InstantClip (56, 58).
+
+**Every click rides the click file.** On a click, notify-action writes
+`<epoch-seconds>|<route-or-action:token>` to
+`~/.cache/steam-native-notify/.click`. No external `steam` invocation
+remains: an external URL cannot pick the surface, because the client's
+handlers choose the overlay whenever a game is merely RUNNING and raise the
+main window over a focused game. The accepted loss is a click landing after
+Steam has fully quit, which the old external path could serve by booting the
+client; the popup only survives ~8s on this daemon, so that window is
+documented rather than kept. The epoch stamp exists because the bridge only
+polls while armed: a click written after the disarm would sit in the file and
+fire as a surprise on the NEXT arm, so the bridge drops anything older than
+30s (or unstamped), with a log line.
+
+**The bridge consumes it.** clickbridge.ts polls the file every 1s for 120s
+after each delivery (an idle session polls nothing) and picks the surface by
+LIVE focus, from the client's own signal
+(`SteamClient.System.UI.RegisterForOverlayGameWindowFocusChanged`):
+
+- **Focused game**: the overlay doors, aimed at that appid.
+- **Otherwise**: the desktop doors. The main window is raised (its own
+  popup's `SteamClient.Window.BringToFront`) or, when closed to the tray,
+  created first (`ExecuteSteamURL("steam://open/main")` plus a settle delay);
+  then the route runs through the client's URL executor, or the action token
+  through the same doors retargeted at the desktop instance (appid 0).
+- **Chat picks its surface explicitly on both sides**: the ingestion's
+  "chat" case with `steamidTarget` opens the overlay chat for the focused
+  game; the same case with appid 0 resolves the desktop instance (a game
+  running unfocused would otherwise get an invisible overlay chat); with no
+  game at all, the plain `steam://friends/message/` URL is the proven door.
+
+**The doors (frontend/overlay.ts), each mirroring an observed Steam click:**
+
+- The activate-overlay ingestion, for web pages (`bWebPage`) and named
+  dialogs. `"settings"` is hard-wired to `Settings("System")`, where Steam's
+  own in-game clicks land for BOTH SystemUpdate and HardwareUpdate.
+- The ingestion's `"chat"` case with `steamidTarget` for 1:1 chat; appid 0 is
+  the desktop instance.
+- The FriendsUI dispatcher's `ShowChatRoomGroupDialog(browserInfo,
+  chat_group_id, chat_id)` for group rooms, keyed on a per-surface
+  browserInfo stashed from each toast's React tree at capture time (a
+  provider above the notification fiber; the popup object does not carry it).
+  No stash, no door: the dispatcher dereferences the context's `m_unPID`
+  unconditionally.
+- The navigator doors, via the store's `GetNavigator({unRequestingAppID})`:
+  `Media.Screenshot({state:{id}})`, `Media.Clip({state:{id}})`,
+  `Media.Grid()`, `RequestPlaytimeDialog("manual")`.
+
+Provenance for all of them: `docs/steam-routing.md`, "The overlay and the
+surface doors".
+
+**The `nativeToastInGame` setting** (ships off; "Keep Steam's own toasts
+while in a game"): an overlay-context toast is left to Steam — nothing is
+sent to the desktop and Steam's popup is not closed, whatever
+`hideSteamToast` says. Desktop-context toasts are unaffected, so a game
+running unfocused still notifies the desktop. Capture and logging still run,
+and the bridge is still armed (an earlier desktop notification may be waiting
+for its click).
+
+### Log vocabulary
+
+All in `~/.cache/steam-native-notify/plugin.log`:
+
+| line | meaning |
+|---|---|
+| `from-toast <name> type=N (...)` | extraction worked; the fields follow |
+| `toast <name> -> {...}` | delivered; the JSON carries `route` and `ingame` |
+| `toast <name> -> {...} (suppressed: native in-game)` | overlay-context toast left to Steam (`nativeToastInGame` on); nothing sent |
+| `click-bridge: <payload>` | a click was consumed from the file |
+| `click-bridge: stale click dropped (Ns old): <route>` | consumed but older than 30s; not opened |
+| `click-bridge: unstamped click dropped: ...` | consumed but missing its epoch stamp; not opened |
+| `click-bridge: desktop <route>` | desktop surface chosen; navigating |
+| `click-bridge: main window closed; opening it` | tray-only; creating the window first |
+| `overlay: open appid=N ...` | activate-overlay ingestion door |
+| `overlay: chat room appid=N group=G chat=C` | room dialog door |
+| `overlay: screenshot / clip / media / playtime dialog appid=N` | navigator doors |
+| `overlay: toast context stashed (desktop\|overlay)` | browserInfo captured for the room door |
+| `click-bridge: overlay door failed` / `desktop door failed` | a door found no store or navigator |
+| `overlay: chat room appid=N has no stashed toast context` | room door refused: no toast seen on that surface yet |
+
+Every consumed click logs `click-bridge:`; a consumed click with no line after
+it was the double-parse bug, fixed in c07c4d1.
+
+### Known and accepted limits
+
+- Two simultaneous games: the bridge targets the first overlay.
+- A click after Steam has fully quit does nothing (see above).
+- Clicks beyond the 120s arm window are never opened: written after the
+  disarm, they sit in the file until the next arm and are then dropped as
+  stale.
+- Steam updates reshuffle the minified surfaces the doors hold: the
+  activate-overlay store, `GetNavigator`, the FriendsUI dispatcher, the
+  browserInfo provider shape, `m_mapPopups`, `GetOverlayBrowserInfo`. The
+  `steam-update-smoke` skill's bridge smoke is the check.
+- The popup is the whole click window: quickshell 1.2 expires it after ~8s
+  despite `-t 0` and the action dies with it (the notification-centre copy is
+  inert). Orthogonal to routing, but it bounds how a click can ever be tested
+  or used here.
 
 ## Working on this: read before touching anything
 
@@ -99,6 +228,11 @@ inside the existing window. If you are not looking at Steam, a successful
 navigation is indistinguishable from nothing happening. That produced a fourth
 wrong conclusion.
 
+**Our clicks have windows too.** The bridge polls for 120s after each
+delivery; a click consumed outside a door logs why. Every consumed click logs
+`click-bridge:`; no line means the bridge was not armed, the poll ended, or
+the bundle is stale.
+
 **Firing test notifications.** `tools/fire TestDownloadComplete 1073390`
 writes a command file into `~/.cache/steam-native-notify`; the backend hands it
 over exactly once, and the frontend poll executes it within ~3s, calling the
@@ -139,9 +273,10 @@ design captures so one real notification yields everything needed.
 
 ## What is verified
 
-- Toasts are CEF popup windows named `notificationtoasts_<N>_desktop`. The
-  title is the only thing visible outside the process; the text lives in the
-  DOM.
+- Toasts are CEF popup windows: `notificationtoasts_<N>_desktop` on the
+  desktop, `notificationtoasts_uid<appid>-...` in a focused game's overlay
+  context. The title is the only thing visible outside the process; the text
+  lives in the DOM.
 - Steam attaches its own notification object to the toast's React tree:
   `{ notificationID, rtCreated, eType, nToastDurationMS, fnNotificationResolved,
   eSource, data, bNewIndicator }`. Client-sourced (`eSource=1`), `data` is a
@@ -184,9 +319,20 @@ These were the first server-sourced captures, without waiting for a live
 event.
 
 Watched end-to-end clicks: fired Achievement and SystemUpdate toasts were
-clicked; the log shows `steam -foreground` then the route a second later each
-time, and Steam surfaced on the achievements page and opened Settings. That
+clicked; Steam surfaced on the achievements page and opened Settings. That
 click-verifies the openurl and settings route families.
+
+### Real events and surfaces (2026-08-29)
+
+- **GroupChatMessage**: real mentions AND plain group messages toast; the
+  decoded fields include `chat_group_id` and `chat_id`, which the room door
+  needs. A group *invite* arrives as a plain FriendMessage, not a
+  GroupChatMessage.
+- **Real PlaytimeWarning, real FriendMessage DMs, GameRecordingStop with a
+  `clip_id`, OverlaySplashScreen**: all captured from live events, not fires.
+- **Every type whose Steam click acts now has a working mirror on every
+  surface** — in-game (Helldivers 2), desktop with the game unfocused,
+  tray-only, and no game — each verified by watching the click land.
 
 ### Observed click behaviour, with Steam focused
 
@@ -218,6 +364,22 @@ defensible.
   handlers. It is all React state.
 - **Compositor rules for hiding Steam's toast.** The plugin closes the popup
   itself after reading it, which is portable and knows the read succeeded.
+- **External steam:// URLs into the overlay.** The wiki's `steam://overlay`
+  command is gone from current binaries, and an externally invoked
+  `steam://openexternalforpid` never reaches its JS handler — the client
+  raises its main window over the game instead. Even a bare
+  `steam://openurl/` navigates the desktop client and raises it over a
+  focused game. The overlay is reachable only from inside the shared JS
+  context.
+- **The appid-0 ingestion cannot render `requestplaytime`.** The desktop
+  playtime dialog opens through the navigator door
+  (`GetNavigator({unRequestingAppID: 0}).RequestPlaytimeDialog("manual")`),
+  not the activate-overlay request.
+- **Instance objects are NOT valid browserInfo.** `ShowChatRoomGroupDialog`
+  keys on a toast popup's `params.browserInfo` (its `m_unPID`); passing an
+  overlay/desktop instance object opens the dialog on the wrong surface and
+  never reuses an existing window. Only the browserInfo stashed from a
+  toast's React tree works.
 
 ## The routing question, resolved
 
@@ -245,8 +407,11 @@ module references and provenance: `docs/steam-routing.md`. The short version:
   primary split is client-handled vs server-webbed, then by activate primitive.
 
 Routing implements that catalog (`frontend/routes.ts`), each rule citing its
-row in `docs/steam-routing.md`. 31 of 62 types route; the rest are inert in
-Steam or open dialogs no URL reaches (group chat rooms, Media items, modals).
+row in `docs/steam-routing.md`. 31 of 62 types route as URLs. Of the rest,
+five open dialogs no URL reaches — the group chat room, media items, the
+playtime dialog — and the click bridge now opens those through Steam's own
+components ("The click architecture" above); the remainder are inert in Steam
+itself, so they stay inert here.
 
 ### Constraint the user has been firm about, and was right about
 
@@ -257,78 +422,22 @@ A notification whose click does nothing is correct if Steam's own toast does
 nothing. When adding a route, cite the observation or the Steam code path it
 came from.
 
-## Focus, resolved without window-manager code
-
-`steam://nav/...` and `steam://openurl/...` change pages inside the existing
-window and never raise it; only the chat routes self-focus (`friends/message`
-passes `btakefocus=1`). Steam never needed raise-on-navigate on the desktop:
-its toasts are only clickable while Steam is already focused. The desktop
-`steam://` surface contains no raising URL at all (the dispatcher and every
-table entry were read; the one `BringToFront` on navigation is gamepad-only).
-
-The fix is Steam's own launcher-activation path: an argless `steam` invocation
-while the client runs makes it show and focus its main window itself (it
-becomes `steam -foreground` in the log). Verified live; focus moved to Steam on
-any-WM mechanics. `tools/notify-action` runs, on click only, `steam;
-steam "$route"` for non-chat routes (sequenced, so a tray-only client surfaces
-first and a stopped one boots then navigates), and just the route for chat
-routes, whose dialog would otherwise risk being buried by the main window.
-`notify-action --click-plan <route>` prints the decision; `tools/test-backend`
-asserts it. Unclicked notifications never touch the `steam` binary at all.
-
 ## Still open
 
-1. ~~Watch a click on the chat-route skip.~~ User-verified 2026-08-29,
-   including in-game: with Helldivers 2 focused, the click opened the chat in
-   the Steam overlay, main window left alone.
-2. ~~The tray-only case end to end.~~ User-verified 2026-08-29.
-3. **One real server event is still worth a look.** Injection verifies the
+1. **The server-type sweep has gaps.** AsyncGame (12), TradeReversal (29),
+   ModeratorMsg (14), FamilyInvite (16) and General (10) have never been
+   injected; the CloudSyncConflict/Failure test fires have never been run
+   either.
+2. **Tray-only against the dialog doors.** The tray-only path is verified for
+   URL routes; the room, screenshot and clip doors have not been clicked from
+   a tray-only client.
+3. **Clip from the desktop.** A GameRecordingStop/InstantClip click has not
+   been watched on the desktop surface (in-game is verified).
+4. **One real server event is still worth a look.** Injection verifies the
    pipeline against the rollup shape the bundle describes; a live wishlist
    sale or trade offer confirms the server actually sends that shape,
    especially the Comment rollup's `url` field, which no injection has
    exercised.
-4. ~~In-game capture is untested.~~ User-verified 2026-08-29 with Helldivers 2
-   running: toasts are captured and mirrored, and both copies are clickable.
-   The session also exposed a divergence, since fixed: Steam's own in-game
-   toast clicks ALL stay in the overlay, and the client routes even our chat
-   click into the overlay by itself -- but the activation preamble
-   (`steam` before the route) raised the desktop client OVER the game.
-   Skipping activation was not enough: even a bare openurl navigates the
-   desktop client and raises it over the game. No external steam:// URL
-   reaches the overlay browser (the wiki's steam://overlay is gone from
-   current binaries; steam://openexternalforpid invoked externally never
-   reaches its JS handler). The working door, proven live via the dev-fire
-   overlay probes (the synthetic request opened the gifts page in the
-   Helldivers 2 overlay): the store owning OnGameOverlayActivateRequested,
-   reachable from the shared context, routes bWebPage requests into the
-   overlay navigator. The click bridge uses it: in-game, notify-action
-   writes bridgeable routes to RUNTIME_DIR/.click (click_plan "overlay");
-   clickbridge.ts polls TakeClick for 120s after each delivery and opens
-   them via overlay.ts -- openurl routes as overlay web pages,
-   steam://settings/system as the ingestion's "settings" dialog (hard-wired
-   to Settings("System"), the same page Steam's own in-game SystemUpdate
-   click opens). Chat routes still go through `steam` (the client overlays
-   them itself); nav and settings/controller routes are inert in-game (no
-   overlay equivalent). End-to-end verified 2026-08-29 in Helldivers 2:
-   Gift click -> gifts page in the overlay browser, no focus theft.
-   Bridge triage: every consumed click logs `click-bridge:`; a consumed
-   click with no line after it was the double-parse bug, fixed in c07c4d1.
-   In-game vs desktop is Steam's own per-focus decision, not process
-   detection: Steam renders each toast in the surface the user is on
-   (overlay-context names `notificationtoasts_uid<appid>-...` vs
-   `..._desktop`), and the captured name rides the payload as `ctx`.
-   A desktop-context click opens the client window even while a game runs
-   unfocused -- exactly what Steam's own toast does (observed).
-5. **The popup is the whole click window.** quickshell 1.2 expires the popup
-   after ~8s despite `-t 0` and the action dies with it (the notification
-   centre copy is inert). Orthogonal to routing, but it bounds how a click can
-   ever be tested or used here.
-6. ~~Ecosystem: migrate to the starlight compiler and `millennium.toml`.~~
-   Done (2026-08-28). The plugin is a packed `.star`
-   (`me.tysmith.steam-native-notify`), built and installed by
-   `bun run build`; `@steambrew/client` imports became the `millennium`
-   module; `tools/notify-action` rides inside the .star as an asset and the
-   backend materializes it to `~/.cache/steam-native-notify` at load, next to
-   the `.dev-fire` handoff and the mirrored `plugin.log`. The whole pipeline
-   was re-verified live through `tools/fire` (Achievement and a server Gift
-   injection) after the switch.
+5. **The daemon matrix.** Everything end to end ran on this machine's daemon
+   (quickshell). The escaping and caps seams are tested offline; mako, dunst,
+   GNOME and KDE have not seen a live click.

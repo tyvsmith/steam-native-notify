@@ -11,7 +11,10 @@ routing rules, not counted by hand.
 
 - **31** types route.
 - **22** types are inert in Steam itself: a click only dismisses, and so does ours.
-- The remainder open dialogs no URL can reach, so their clicks stay inert here.
+- The remainder open dialogs no URL can reach. Five of them (the chat room,
+  media items, the playtime dialog) act anyway: the click bridge opens the same
+  dialog through Steam's own doors, on whichever surface is focused. The rest
+  stay inert here too.
 - "server" types arrive from the web notification system; their payload is
   `body_data` JSON on the toast's React object, not a client protobuf.
 
@@ -25,10 +28,10 @@ routing rules, not counted by hand.
 | 6 | `LowBattery` | dismiss only | none | client, bundle |
 | 7 | `SystemUpdate` | Settings → System | `steam://settings/system` | client, bundle |
 | 8 | `FriendMessage` | chat dialog with the sender | `steam://friends/message/<steamid>` | client, bundle + observed |
-| 9 | `GroupChatMessage` | that chat room’s dialog | none — no steam:// entry point reaches the room dialog | client, bundle |
+| 9 | `GroupChatMessage` | that chat room’s dialog | none as a URL — the click bridge opens the room dialog (`chat_group_id` + `chat_id`) | client, bundle |
 | 10 | `FriendInviteRollup` | pending-invites dialog | `steam://openurl/` + pending invites page | client, bundle |
 | 12 | `FamilySharingStopPlaying` | nothing | none | client, bundle |
-| 14 | `Screenshot` | that screenshot in the Media dialog | none — Media dialogs have no URL | client, bundle |
+| 14 | `Screenshot` | that screenshot in the Media dialog | none as a URL — the click bridge opens that screenshot (`screenshot_handle`; the media grid without one) | client, bundle |
 | 15 | `CloudSyncFailure` | library page for the game | `steam://nav/games/details/<appid>` | client, bundle |
 | 16 | `CloudSyncConflict` | library page for the game | `steam://nav/games/details/<appid>` | client, bundle |
 | 17 | `IncomingVoiceChat` | chat dialog; does not accept the call | `steam://friends/message/<steamid>` | client, bundle + observed |
@@ -59,7 +62,7 @@ routing rules, not counted by hand.
 | 42 | `RemoteClientStartStream` | nothing | none | client, bundle |
 | 43 | `StreamingClientConnection` | nothing | none | client, bundle |
 | 44 | `FamilyInvite` | family join page for that invite | `steam://openurl/` + join page | server, bundle |
-| 45 | `PlaytimeWarning` | playtime dialog | none | client, bundle |
+| 45 | `PlaytimeWarning` | playtime dialog | none as a URL — the click bridge opens the playtime request dialog | client, bundle |
 | 46 | `FamilyPurchaseRequest` | family management, requests tab | `steam://openurl/` + requests tab | server, bundle |
 | 47 | `FamilyPurchaseRequestResponse` | family management, requests tab | `steam://openurl/` + requests tab | server, bundle |
 | 48 | `ParentalFeatureRequest` | family management, requests tab | `steam://openurl/` + requests tab | server, bundle |
@@ -70,9 +73,9 @@ routing rules, not counted by hand.
 | 53 | `RequestedGameAdded` | library page after a package→app lookup | none — lookup unavailable here | server, bundle |
 | 54 | `ClipDownloaded` | that clip in the Media dialog | none — Media dialogs have no URL | server, bundle |
 | 55 | `GameRecordingStart` | explicit no-op | none | client, bundle |
-| 56 | `GameRecordingStop` | that clip in the Media dialog | none — Media dialogs have no URL | client, bundle |
+| 56 | `GameRecordingStop` | that clip in the Media dialog | none as a URL — the click bridge opens that clip (`clip_id`; the media grid without one) | client, bundle |
 | 57 | `GameRecordingUserMarkerAdded` | explicit no-op | none | client, bundle |
-| 58 | `GameRecordingInstantClip` | that clip in the Media dialog | none — Media dialogs have no URL | client, bundle |
+| 58 | `GameRecordingInstantClip` | that clip in the Media dialog | none as a URL — the click bridge opens that clip (`clip_id`; the media grid without one) | client, bundle |
 | 59 | `PlaytestInvite` | gated-access page for the app | `steam://openurl/` + gated-access page | server, bundle |
 | 60 | `TradeReversal` | your trade history page | `steam://openurl/` + trade history | server, bundle |
 | 61 | `HardwareUpdateAvailable` | Settings → Controller (desktop) | `steam://settings/controller` | client, bundle |

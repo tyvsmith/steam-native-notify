@@ -11,12 +11,16 @@ analysis of Steam's own click routing that every route cites;
 ## State
 
 Routing is built on Steam's own click logic, read out of the shipped UI bundle
-(31 of 62 types route; the rest are inert in Steam or open dialogs no URL
-reaches). The catalog is runtime-verified for ten types across both
-notification systems, with watched end-to-end clicks for the openurl and
-settings families. What remains is the "Still open" list in the handoff:
-the chat-route click, the tray-only click, one real server event, in-game
-capture.
+(31 of 62 types route as URLs; five more act through the click bridge's dialog
+doors; the rest are inert in Steam itself). Every click is executed from
+inside the client: notify-action writes the click to
+`~/.cache/steam-native-notify/.click`, the click bridge consumes it and picks
+the surface by live game focus — overlay doors for the focused game, desktop
+doors (raising or creating the main window) otherwise. Every type whose Steam
+click acts has a working mirror on every surface, verified live (in-game,
+desktop with the game unfocused, tray-only, no game). What remains is the
+"Still open" list in the handoff: unexercised server-type fires, the
+tray-only dialog doors, a real Comment url, the daemon matrix.
 
 ## Commands
 
@@ -45,7 +49,10 @@ Plugin log: `~/.cache/steam-native-notify/plugin.log`, truncated at each
 backend load (Millennium buffers a packed plugin's logger output away from
 Steam's console log, so the backend mirrors it there). Millennium's own
 loader lines are still in `~/.steam/steam/logs/console-linux.txt`, filtered
-by `me.tysmith.steam-native-notify`.
+by `me.tysmith.steam-native-notify`. Click triage reads the same log:
+`click-bridge:` lines show every consumed click and the chosen surface,
+`overlay:` lines show each door opening. The full vocabulary is in the
+handoff ("The click architecture").
 
 ## Hard constraints
 
@@ -87,6 +94,12 @@ meaningless, and produced three wrong conclusions in this project.
 
 **Watch the client while clicking.** A `steam://nav/...` route changes a page
 inside the existing window; unwatched, a working navigation looks like nothing.
+
+**Clicks ride the click bridge, which has windows.** The bridge polls for 120s
+after each delivery and drops clicks older than 30s; a click outside those
+windows (or after Steam quits) does nothing, by design. Every consumed click
+logs a `click-bridge:` line — no line means the bridge was not armed or the
+poll ended.
 
 **Read a failed `tools/fire` correctly.** No `dev-fire:` log line means the
 settings toggle is off. A `dev-fire:` line with no `from-toast` line means one
@@ -131,13 +144,13 @@ frontend/routes.ts        the routing catalog, cites steam-routing.md
 frontend/urlstore.ts      Steam's URL templates (GetSteamURLList)
 frontend/identity.ts      signed-in steamid64, from the backend
 frontend/log.ts           dlog/safeJson; prefixes are capture's contract
-frontend/overlay.ts       in-game overlay browser door (activate-overlay)
-frontend/clickbridge.ts   in-game clicks: .click file -> overlay.ts
+frontend/overlay.ts       the surface doors: overlay/desktop dialogs, focus
+frontend/clickbridge.ts   every click: .click file -> surface by live focus
 frontend/devfire.ts       tools/fire door, gated by a setting
 frontend/Settings.tsx     settings panel; settings.ts, one JSON document
 frontend/generated/       generated from vendor/*.proto, do not edit
 backend/main.lua          pure marshaller                (Millennium Lua host)
-tools/notify-action       escaping, delivery, click action        (POSIX sh,
+tools/notify-action       escaping, delivery; a click writes .click (POSIX sh,
                           packed as a .star asset, materialized to ~/.cache)
 vendor/                   Steam's published .proto plus provenance
 ```

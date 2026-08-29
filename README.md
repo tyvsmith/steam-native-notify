@@ -4,13 +4,14 @@ A Millennium plugin that mirrors Steam's in-client notification toasts to the
 desktop notification daemon, keeping the artwork and the click action. Toasts
 land in your notification centre with everything else, and a click does what
 clicking Steam's own toast does: open the chat, the library page, the
-achievements page. The click also surfaces the Steam window first, which
-Steam's own toasts never do.
+achievements page, the chat room or screenshot dialog. With a game focused the
+click opens in the game's overlay; on the desktop it surfaces the Steam window
+first, which Steam's own toasts never do, and reopens it from the tray.
 
 Routing mirrors Steam's own click logic, read out of the shipped UI bundle:
-31 of 62 notification types route; the rest are inert in Steam itself or open
-dialogs no URL can reach. `docs/notification-types.md` lists every type and
-what a click does.
+31 of 62 notification types route as URLs, five more open Steam's own dialogs
+through the click bridge, and the rest are inert in Steam itself.
+`docs/notification-types.md` lists every type and what a click does.
 
 ## Why a plugin
 
@@ -39,10 +40,13 @@ Runtime dependencies: `notify-send`, `curl`, `steam`, `sh`.
 
 ## Settings
 
-Two toggles in the plugin's settings panel, both off by default:
+Three toggles in the plugin's settings panel, all off by default:
 
 - **Hide Steam's own notification toasts**: close Steam's toast once it has
   been read, so only the desktop notification shows.
+- **Keep Steam's own toasts while in a game**: while a game is focused, leave
+  Steam's own in-game toast alone and send no desktop notification; out of
+  the game, desktop notifications as normal.
 - **Accept test commands from tools/fire**: the development door for firing
   test notifications. Leave it off unless you are working on the plugin.
 
@@ -68,6 +72,8 @@ each backend load); Millennium's loader lines are in
 - A notification is clickable only while its popup is up; the copy in the
   notification centre is inert. quickshell 1.2 expires the popup after about
   8 seconds despite the no-timeout hint, which bounds the click window.
+- Clicks are executed by the running Steam client, so a click landing after
+  Steam has fully quit does nothing.
 - Some server-sent types (wishlist sales, comments, and others) never toast
   unless enabled under Steam Settings > Notifications. Steam suppresses them
   before this plugin sees anything.
