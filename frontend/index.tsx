@@ -6,6 +6,7 @@ import { setIdentity } from './identity';
 import { loadUrlTemplates } from './urlstore';
 import { dlog, safeJson } from './log';
 import { armClickBridge } from './clickbridge';
+import { trackOverlayFocus } from './overlay';
 import { startDevFirePoll } from './devfire';
 import { SettingsPanel } from './Settings';
 import { loadSettings, parseCallableJson, settings } from './settings';
@@ -271,6 +272,7 @@ export default definePlugin(() => {
 	void loadIdentity();
 	void loadUrlTemplates().then((summary) => dlog(`url templates: ${summary}`));
 	installHook();
+	trackOverlayFocus();
 	startDevFirePoll();
 
 	return {

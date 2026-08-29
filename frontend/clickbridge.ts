@@ -1,6 +1,13 @@
 import { callable } from 'millennium';
 import { dlog } from './log';
-import { openDialogInOverlay, openInOverlay, openMediaInOverlay, openScreenshotInOverlay, runningOverlayAppId } from './overlay';
+import {
+	openDialogInOverlay,
+	openInOverlay,
+	openMediaInOverlay,
+	openScreenshotInOverlay,
+	overlayFocusedAppId,
+	runningOverlayAppId,
+} from './overlay';
 
 /**
  * The in-game click bridge. With a game running, a desktop notification's
@@ -27,6 +34,40 @@ const OPENURL_PREFIX = 'steam://openurl/';
 let armedUntil = 0;
 let timer: number | null = null;
 
+/**
+ * Desktop behavior, executed from inside Steam: raise the main window (its
+ * own per-window SteamClient.Window.BringToFront, the same self-raise the
+ * launcher-activation path uses) and run the route through the client's own
+ * URL executor. Action tokens have no desktop behavior by analysis, so they
+ * end here.
+ */
+function desktopClick(route: string): void {
+	if (route.startsWith('action:')) {
+		dlog(`click-bridge: ${route} is in-game only; desktop click is inert`);
+		return;
+	}
+	try {
+		const mgr: any = Reflect.get(globalThis, 'g_PopupManager');
+		const popups: Iterable<any> = mgr?.m_mapPopups?.values?.() ?? [];
+		for (const popup of popups) {
+			const win = popup?.window ?? popup?.m_popup;
+			if (typeof win?.name === 'string' && win.name.startsWith('SP Desktop')) {
+				win.SteamClient?.Window?.BringToFront?.();
+				break;
+			}
+		}
+	} catch (e) {
+		dlog(`click-bridge: raise failed: ${(e as Error)?.message ?? e}`);
+	}
+	try {
+		const sc: any = Reflect.get(globalThis, 'SteamClient');
+		dlog(`click-bridge: desktop ${route}`);
+		sc?.URL?.ExecuteSteamURL?.(route);
+	} catch (e) {
+		dlog(`click-bridge: navigate failed: ${(e as Error)?.message ?? e}`);
+	}
+}
+
 export function armClickBridge(): void {
 	armedUntil = Date.now() + ARM_WINDOW_MS;
 	if (timer !== null) return;
@@ -47,10 +88,12 @@ export function armClickBridge(): void {
 			if (typeof route !== 'string' || !route) return;
 			dlog(`click-bridge: ${route}`);
 			const appid = await runningOverlayAppId();
-			if (appid === null) {
-				// The game quit between the click and this poll; the desktop
-				// client is visible again, so nothing needs surfacing.
-				dlog(`click-bridge: no overlay up for ${route}`);
+			// Steam placed this toast in the overlay context, but its placement
+			// can lag focus changes; re-check at click time. If the game is not
+			// actually focused now (or quit), the click behaves like a desktop
+			// one -- what Steam's own desktop-context toast click does.
+			if (appid === null || overlayFocusedAppId() !== appid) {
+				desktopClick(route);
 				return;
 			}
 			let opened: boolean;

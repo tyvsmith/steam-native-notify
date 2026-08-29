@@ -18,6 +18,30 @@ import { dlog, safeJson } from './log';
  */
 let overlayStore: any;
 
+/**
+ * Live game-focus state, from the client's own signal. Steam places toasts by
+ * focus too, but its placement can lag on this compositor (observed: an
+ * overlay-context toast while the game was backgrounded), so the click bridge
+ * re-checks focus at CLICK time instead of trusting the notify-time context.
+ */
+let focusedOverlayAppId = 0;
+
+export function trackOverlayFocus(): void {
+	try {
+		const sc: any = Reflect.get(globalThis, 'SteamClient');
+		sc?.System?.UI?.RegisterForOverlayGameWindowFocusChanged?.((appid: number) => {
+			focusedOverlayAppId = Number(appid) || 0;
+		});
+	} catch (e) {
+		dlog(`overlay focus tracking failed: ${(e as Error)?.message ?? e}`);
+	}
+}
+
+/** The appid of the game window that has focus right now, or 0. */
+export function overlayFocusedAppId(): number {
+	return focusedOverlayAppId;
+}
+
 export function findOverlayStore(): any {
 	if (overlayStore) return overlayStore;
 	try {
