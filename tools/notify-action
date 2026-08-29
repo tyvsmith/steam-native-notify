@@ -149,11 +149,13 @@ click_plan() {
 	case ${1:-} in
 	"") echo none ;;
 	steam://friends/message/*) echo route ;;
-	# settings/system rides the bridge too: the overlay ingestion's
-	# "settings" dialog is Settings("System"), the same page Steam's own
-	# in-game SystemUpdate click opens. settings/controller and nav routes
-	# have no overlay equivalent, so in-game they stay inert.
-	steam://openurl/* | steam://settings/system) game_running && echo overlay || echo activate+route ;;
+	# Settings routes ride the bridge: the overlay ingestion's "settings"
+	# dialog opens Settings, which is where Steam's own in-game clicks land
+	# for BOTH SystemUpdate and HardwareUpdate (observed 2026-08-29; the
+	# overlay runs the component's gamepad branch, which folds controller
+	# into Settings too). nav routes stay inert in-game: Steam's own
+	# in-game DownloadCompleted click does nothing (observed).
+	steam://openurl/* | steam://settings/*) game_running && echo overlay || echo activate+route ;;
 	*) game_running && echo none || echo activate+route ;;
 	esac
 }

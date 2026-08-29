@@ -56,9 +56,11 @@ export function armClickBridge(): void {
 			let opened: boolean;
 			if (route.startsWith(OPENURL_PREFIX)) {
 				opened = openInOverlay(appid, route.slice(OPENURL_PREFIX.length));
-			} else if (route === 'steam://settings/system') {
-				// The ingestion's "settings" dialog IS Settings("System") --
-				// the same page Steam's own in-game SystemUpdate click opens.
+			} else if (route.startsWith('steam://settings/')) {
+				// The ingestion's "settings" dialog IS Settings("System").
+				// Steam's own in-game clicks land on Settings for both
+				// SystemUpdate and HardwareUpdate (observed 2026-08-29), so
+				// both settings routes map here.
 				opened = openDialogInOverlay(appid, 'settings');
 			} else {
 				dlog(`click-bridge: unbridgeable route ${route}`);
