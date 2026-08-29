@@ -6,7 +6,7 @@ import { setIdentity } from './identity';
 import { loadUrlTemplates } from './urlstore';
 import { dlog, safeJson } from './log';
 import { armClickBridge } from './clickbridge';
-import { trackOverlayFocus } from './overlay';
+import { rememberToastContext, trackOverlayFocus } from './overlay';
 import { startDevFirePoll } from './devfire';
 import { SettingsPanel } from './Settings';
 import { loadSettings, parseCallableJson, settings } from './settings';
@@ -204,6 +204,14 @@ function deliverToast(win: Window, name: string, text: string): void {
 function onPopupCreated(popup: SteamPopup): void {
 	const name = toastName(popup);
 	if (!name || !popup.window) return;
+	// The toast popup's browserInfo is the per-surface context descriptor the
+	// chat dialogs key on (overlay.ts, rememberToastContext); stash it so a
+	// later click can open dialogs on the surface Steam would have used.
+	const p: any = popup;
+	rememberToastContext(
+		name.startsWith('notificationtoasts_uid'),
+		p.params?.browserInfo ?? p.m_rgParams?.browserInfo ?? p.browserInfo,
+	);
 	readWhenPainted(popup.window, name, 0);
 }
 

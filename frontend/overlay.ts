@@ -116,6 +116,28 @@ export function openChatOnDesktop(steamid64: string): boolean {
 }
 
 /**
+ * The context descriptor chat dialogs key on. ShowChatRoomGroupDialog's first
+ * argument flows into GetPerContextChatData / ShowAndOrActivateChat, both
+ * keyed by the browserInfo's m_unPID: the wrong object means the dialog opens
+ * on the wrong surface AND never reuses an existing window. Steam's own toast
+ * click passes the toast popup's params.browserInfo; index.tsx stashes each
+ * toast's browserInfo here per surface at capture time.
+ */
+let desktopToastCtx: unknown = null;
+let overlayToastCtx: unknown = null;
+
+export function rememberToastContext(overlayCtx: boolean, browserInfo: unknown): void {
+	if (!browserInfo) return;
+	if (overlayCtx) {
+		if (!overlayToastCtx) dlog('overlay: toast context stashed (overlay)');
+		overlayToastCtx = browserInfo;
+	} else {
+		if (!desktopToastCtx) dlog('overlay: toast context stashed (desktop)');
+		desktopToastCtx = browserInfo;
+	}
+}
+
+/**
  * The FriendsUI dispatcher the ingestion's chat case calls into; it also
  * carries ShowChatRoomGroupDialog, which is Steam's own GroupChatMessage
  * toast click: LN.ShowChatRoomGroupDialog(browserInfo, chat_group_id,
@@ -144,13 +166,12 @@ function findChatDispatcher(): any {
 
 /** Open a group chat room dialog on the surface for appid (0 = desktop). */
 export function openChatRoomDialog(appid: number, groupId: string, chatId: string): boolean {
-	const store = findOverlayStore();
 	const friends = findChatDispatcher();
-	if (!store || !friends) return false;
+	if (!friends) return false;
 	try {
-		const instance = store.GetInstanceForAppID(appid);
-		dlog(`overlay: chat room appid=${appid} group=${groupId} chat=${chatId}`);
-		friends.ShowChatRoomGroupDialog(instance, groupId, chatId);
+		const ctx = appid > 0 ? overlayToastCtx : desktopToastCtx;
+		dlog(`overlay: chat room appid=${appid} ctx=${ctx ? 'toast' : 'none'} group=${groupId} chat=${chatId}`);
+		friends.ShowChatRoomGroupDialog(ctx ?? undefined, groupId, chatId);
 		return true;
 	} catch (e) {
 		dlog(`overlay: chat room failed: ${(e as Error)?.message ?? e}`);
