@@ -82,6 +82,82 @@ function injectServerNotification(type: number, body: unknown): void {
 	store.OnServerNotification(rollup, 0 /* New */);
 }
 
+/**
+ * Overlay research probes, for the in-game click investigation (2026-08-29):
+ * Steam's own in-game toast clicks stay in the overlay, and no external
+ * steam:// URL reproduces that -- the client raises its main window instead.
+ * The overlay is driven from THIS context: the store that registers
+ * RegisterForActivateOverlayRequests owns both OnGameOverlayActivateRequested
+ * (the ActivateGameOverlayToWebPage ingestion) and OnSteamURLOpenExternalForPID
+ * (the steam://openexternalforpid parser). These probes exercise both, plus
+ * GetOverlayBrowserInfo for the real overlay PIDs.
+ */
+let overlayStore: any;
+
+function findOverlayStore(): any {
+	if (overlayStore) return overlayStore;
+	try {
+		overlayStore = findModuleExport((e: any) => {
+			try {
+				return (
+					typeof e?.OnGameOverlayActivateRequested === 'function' &&
+					typeof e?.OnSteamURLOpenExternalForPID === 'function'
+				);
+			} catch {
+				return false;
+			}
+		});
+	} catch (e) {
+		dlog(`overlay store lookup failed: ${(e as Error)?.message ?? e}`);
+	}
+	return overlayStore;
+}
+
+async function runOverlayProbe(probe: { call?: string; pid?: number; appid?: number; url?: string }): Promise<void> {
+	const store = findOverlayStore();
+	switch (probe.call) {
+		case 'info': {
+			const sc: any = Reflect.get(globalThis, 'SteamClient');
+			const info = await sc?.Overlay?.GetOverlayBrowserInfo?.();
+			dlog(`overlay-info: ${safeJson(info)}`.slice(0, 1500));
+			return;
+		}
+		case 'openexternal': {
+			if (!store) {
+				dlog('overlay probe: store not found');
+				return;
+			}
+			const url = `steam://openexternalforpid/${probe.pid ?? 0}/${probe.url ?? ''}`;
+			const handled = store.OnSteamURLOpenExternalForPID(url);
+			dlog(`overlay-openexternal: pid=${probe.pid} handled=${handled}`);
+			return;
+		}
+		case 'activate': {
+			if (!store) {
+				dlog('overlay probe: store not found');
+				return;
+			}
+			// The request shape ActivateGameOverlayToWebPage produces, read out
+			// of the bundle's own openexternalforpid parser.
+			const request = {
+				unRequestingAppID: probe.appid ?? 0,
+				appid: probe.appid ?? 0,
+				bWebPage: true,
+				strDialog: probe.url ?? '',
+				eWebPageMode: 0 /* Default */,
+				steamidTarget: '0',
+				eFlag: 0 /* OverlayToStoreFlag_None */,
+				strConnectString: '',
+			};
+			dlog(`overlay-activate: ${safeJson(request)}`);
+			store.OnGameOverlayActivateRequested(request);
+			return;
+		}
+		default:
+			dlog(`overlay probe: unknown call ${String(probe.call)}`);
+	}
+}
+
 export function startDevFirePoll(): void {
 	window.setInterval(async () => {
 		if (!settings().devFire) return;
@@ -91,8 +167,13 @@ export function startDevFirePoll(): void {
 				call?: string;
 				args?: unknown[];
 				server?: { type: number; body?: unknown };
+				overlay?: { call?: string; pid?: number; appid?: number; url?: string };
 			} | null>(raw, null);
 			if (!cmd) return;
+			if (cmd.overlay) {
+				void runOverlayProbe(cmd.overlay);
+				return;
+			}
 			if (cmd.server && typeof cmd.server.type === 'number') {
 				injectServerNotification(cmd.server.type, cmd.server.body);
 				return;

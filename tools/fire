@@ -51,6 +51,32 @@ if [[ $1 == --wishlist ]]; then
   exit 0
 fi
 
+# Overlay research probes (in-game click investigation; see devfire.ts):
+#   tools/fire --overlay-info                     dump overlay browser PIDs
+#   tools/fire --overlay-open <pid> <url>         OnSteamURLOpenExternalForPID
+#   tools/fire --overlay-activate <appid> <url>   synthetic ActivateGameOverlayToWebPage
+if [[ $1 == --overlay-info ]]; then
+  printf '{"overlay":{"call":"info"}}\n' >"$RUNTIME_DIR/.dev-fire"
+  echo "queued: overlay info  (result lands in the plugin log)"
+  exit 0
+fi
+
+if [[ $1 == --overlay-open ]]; then
+  pid="${2:?--overlay-open needs a pid}"
+  url="${3:?--overlay-open needs a url}"
+  printf '{"overlay":{"call":"openexternal","pid":%s,"url":"%s"}}\n' "$pid" "$url" >"$RUNTIME_DIR/.dev-fire"
+  echo "queued: overlay openexternal pid=$pid"
+  exit 0
+fi
+
+if [[ $1 == --overlay-activate ]]; then
+  appid="${2:?--overlay-activate needs an appid}"
+  url="${3:?--overlay-activate needs a url}"
+  printf '{"overlay":{"call":"activate","appid":%s,"url":"%s"}}\n' "$appid" "$url" >"$RUNTIME_DIR/.dev-fire"
+  echo "queued: overlay activate appid=$appid"
+  exit 0
+fi
+
 if [[ $1 == --server ]]; then
   type="${2:?--server needs a numeric ESteamNotificationType}"
   body="${3:-{\}}"
