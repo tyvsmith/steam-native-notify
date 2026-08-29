@@ -47,13 +47,6 @@ let armedUntil = 0;
 let timer: number | null = null;
 
 /**
- * Desktop behavior, executed from inside Steam: raise the main window (its
- * own per-window SteamClient.Window.BringToFront, the same self-raise the
- * launcher-activation path uses) and run the route through the client's own
- * URL executor. Action tokens have no desktop behavior by analysis, so they
- * end here.
- */
-/**
  * Raise the main window if it exists; closed to the tray, its popup is
  * destroyed and the appid-0 instance has no surface, so it is opened first
  * through the client's own URL executor (steam://open/main -- the same thing
@@ -83,52 +76,84 @@ function ensureMainWindow(): boolean {
 	return false;
 }
 
-/** Run a desktop door once the main window is up (freshly created needs to settle). */
+function mainWindowPresent(): boolean {
+	try {
+		const mgr: any = Reflect.get(globalThis, 'g_PopupManager');
+		const popups: Iterable<any> = mgr?.m_mapPopups?.values?.() ?? [];
+		for (const popup of popups) {
+			const win = popup?.window ?? popup?.m_popup;
+			if (typeof win?.name === 'string' && win.name.startsWith('SP Desktop')) return true;
+		}
+	} catch {
+		/* treated as absent */
+	}
+	return false;
+}
+
+/**
+ * Run a desktop door once the main window is up. A freshly created window is
+ * POLLED for (its popup appearing in g_PopupManager) rather than trusted to a
+ * fixed delay: on a slow start a blind timer fires the door against nothing
+ * and the click is silently lost.
+ */
 function afterMainWindow(fn: () => void): void {
 	if (ensureMainWindow()) {
 		fn();
 		return;
 	}
-	window.setTimeout(fn, 1500);
+	const deadline = Date.now() + 6000;
+	const poll = window.setInterval(() => {
+		const present = mainWindowPresent();
+		if (!present && Date.now() < deadline) return;
+		window.clearInterval(poll);
+		if (!present) dlog('click-bridge: main window slow to appear; running the door anyway');
+		fn();
+	}, 250);
 }
 
-/**
- * Action tokens on the desktop: the same doors, retargeted at the desktop
- * instance (appid 0 -- GetInstanceForAppID(0), proven by the desktop chat
- * fix). Steam's own desktop clicks for these types open the media page and
- * the playtime dialog in the main window, so inert was the wrong mirror.
- */
 function chatRoomParts(route: string): [string, string] | null {
 	const parts = route.slice('action:chatroom:'.length).split(':');
 	return parts.length === 2 && parts[0] && parts[1] ? [parts[0], parts[1]] : null;
 }
 
-function desktopAction(route: string): void {
-	afterMainWindow(() => {
-		let opened: boolean;
-		if (route.startsWith('action:chatroom:')) {
-			const parts = chatRoomParts(route);
-			if (!parts) return;
-			opened = openChatRoomDialog(0, parts[0], parts[1]);
-		} else if (route.startsWith('action:screenshot:')) {
-			opened = openScreenshotInOverlay(0, route.slice('action:screenshot:'.length));
-		} else if (route.startsWith('action:clip:')) {
-			opened = openClipInOverlay(0, route.slice('action:clip:'.length));
-		} else if (route === 'action:media') {
-			opened = openMediaInOverlay(0);
-		} else if (route === 'action:requestplaytime') {
-			opened = openPlaytimeDialog(0);
-		} else {
-			dlog(`click-bridge: unbridgeable action ${route}`);
+/**
+ * One dispatch for the action tokens, on either surface: appid 0 is the
+ * desktop instance (proven by the desktop chat fix; Steam's own desktop
+ * clicks for these types open the media page and the playtime dialog in the
+ * main window), any other appid the game's overlay. Adding a token here
+ * covers both surfaces at once.
+ */
+function runActionToken(appid: number, route: string): void {
+	const surface = appid === 0 ? 'desktop' : 'overlay';
+	let opened: boolean;
+	if (route.startsWith('action:chatroom:')) {
+		const parts = chatRoomParts(route);
+		if (!parts) {
+			dlog(`click-bridge: malformed action ${route}`);
 			return;
 		}
-		if (!opened) dlog('click-bridge: desktop door failed');
-	});
+		opened = openChatRoomDialog(appid, parts[0], parts[1]);
+	} else if (route.startsWith('action:screenshot:')) {
+		opened = openScreenshotInOverlay(appid, route.slice('action:screenshot:'.length));
+	} else if (route.startsWith('action:clip:')) {
+		opened = openClipInOverlay(appid, route.slice('action:clip:'.length));
+	} else if (route === 'action:media') {
+		opened = openMediaInOverlay(appid);
+	} else if (route === 'action:requestplaytime') {
+		// The overlay renders this through the ingestion's dialog-request
+		// list; the desktop has no container for it and uses the navigator
+		// door instead. Both observed.
+		opened = appid === 0 ? openPlaytimeDialog(0) : openDialogInOverlay(appid, 'requestplaytime');
+	} else {
+		dlog(`click-bridge: unbridgeable action ${route}`);
+		return;
+	}
+	if (!opened) dlog(`click-bridge: ${surface} door failed`);
 }
 
 function desktopClick(route: string): void {
 	if (route.startsWith('action:')) {
-		desktopAction(route);
+		afterMainWindow(() => runActionToken(0, route));
 		return;
 	}
 	// Navigate once the window exists; a freshly created one needs its settle
@@ -190,7 +215,7 @@ export function armClickBridge(): void {
 					// Game running but unfocused: the desktop instance,
 					// explicitly (the URL handler would pick the overlay).
 					afterMainWindow(() => {
-						if (!openChatOnDesktop(sid)) dlog('click-bridge: overlay door failed');
+						if (!openChatOnDesktop(sid)) dlog('click-bridge: desktop chat door failed');
 					});
 				} else {
 					// No game at all: the URL handler is the proven desktop
@@ -208,6 +233,10 @@ export function armClickBridge(): void {
 				desktopClick(route);
 				return;
 			}
+			if (route.startsWith('action:')) {
+				runActionToken(appid, route);
+				return;
+			}
 			let opened: boolean;
 			if (route.startsWith(OPENURL_PREFIX)) {
 				opened = openInOverlay(appid, route.slice(OPENURL_PREFIX.length));
@@ -217,25 +246,11 @@ export function armClickBridge(): void {
 				// SystemUpdate and HardwareUpdate (observed 2026-08-29), so
 				// both settings routes map here.
 				opened = openDialogInOverlay(appid, 'settings');
-			} else if (route.startsWith('action:chatroom:')) {
-				// GroupChatMessage: the room dialog, on the overlay surface.
-				const parts = chatRoomParts(route);
-				if (!parts) return;
-				opened = openChatRoomDialog(appid, parts[0], parts[1]);
-			} else if (route.startsWith('action:screenshot:')) {
-				// Screenshot with its handle: the specific item, where Steam's
-				// own in-game click goes.
-				opened = openScreenshotInOverlay(appid, route.slice('action:screenshot:'.length));
-			} else if (route.startsWith('action:clip:')) {
-				// A finished recording: the specific clip.
-				opened = openClipInOverlay(appid, route.slice('action:clip:'.length));
-			} else if (route === 'action:media') {
-				// Screenshot without a handle: the Recordings & Screenshots view.
-				opened = openMediaInOverlay(appid);
-			} else if (route === 'action:requestplaytime') {
-				// PlaytimeWarning: the playtime request dialog, via the
-				// ingestion's own case.
-				opened = openDialogInOverlay(appid, 'requestplaytime');
+			} else if (route.startsWith('steam://nav/')) {
+				// Inert by design: Steam's own in-game click for nav routes
+				// does nothing (observed for DownloadCompleted).
+				dlog(`click-bridge: inert in-game, mirrors Steam: ${route}`);
+				return;
 			} else {
 				dlog(`click-bridge: unbridgeable route ${route}`);
 				return;

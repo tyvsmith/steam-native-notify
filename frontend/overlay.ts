@@ -70,7 +70,12 @@ export async function runningOverlayAppId(): Promise<number | null> {
 	try {
 		const sc: any = Reflect.get(globalThis, 'SteamClient');
 		const info = await sc?.Overlay?.GetOverlayBrowserInfo?.();
-		const appid = Array.isArray(info) ? Number(info[0]?.appID) : NaN;
+		if (!Array.isArray(info) || info.length === 0) return null;
+		// With several games running, prefer the entry for the FOCUSED game:
+		// answering with a different game's appid would make the focus check
+		// read false and raise the desktop over a focused fullscreen game.
+		const entry = info.find((e: any) => Number(e?.appID) === focusedOverlayAppId) ?? info[0];
+		const appid = Number(entry?.appID);
 		return Number.isFinite(appid) && appid > 0 ? appid : null;
 	} catch {
 		return null;
@@ -168,10 +173,18 @@ function findChatDispatcher(): any {
 export function openChatRoomDialog(appid: number, groupId: string, chatId: string): boolean {
 	const friends = findChatDispatcher();
 	if (!friends) return false;
-	const ctx = appid > 0 ? overlayToastCtx : desktopToastCtx;
+	let ctx: any = appid > 0 ? overlayToastCtx : desktopToastCtx;
+	// A stash from a game that has since exited points at a dead PID; the
+	// dispatcher would report success while opening nothing. When the context
+	// names an appid, it must be the one being targeted.
+	if (appid > 0 && ctx && typeof ctx.m_unAppID === 'number' && ctx.m_unAppID !== appid) {
+		dlog(`overlay: stashed toast context is for appid ${ctx.m_unAppID}, not ${appid}; treating as missing`);
+		ctx = null;
+	}
 	if (!ctx) {
 		// The dispatcher dereferences the context's m_unPID unconditionally;
-		// calling without one throws inside Steam's code.
+		// calling without one throws inside Steam's code. Known limit: after a
+		// load, the slot for a surface only fills once a toast renders there.
 		dlog(`overlay: chat room appid=${appid} has no stashed toast context`);
 		return false;
 	}

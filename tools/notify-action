@@ -180,6 +180,14 @@ fi
 tries=0
 until chosen=$(notify-send -a "$APP_NAME" -i "$icon" -t "$EXPIRE" \
 	-A "$ACTION=Open" "$title" "$body" 2>/dev/null); do
+	# Retry ONLY while the daemon is absent. A failure with the daemon
+	# reachable is something else (it may even have fired after the toast
+	# displayed), and retrying would re-deliver the same notification.
+	if gdbus call --session --dest org.freedesktop.Notifications \
+		--object-path /org/freedesktop/Notifications \
+		--method org.freedesktop.Notifications.GetCapabilities >/dev/null 2>&1; then
+		exit 1
+	fi
 	tries=$((tries + 1))
 	[ "$tries" -lt 10 ] || exit 1
 	sleep "${NOTIFY_ACTION_RETRY_DELAY:-3}"
@@ -197,11 +205,15 @@ done
 # drops anything older than 30 seconds.
 case $(click_plan "$route" "$ingame_action") in
 overlay)
+	# Written to a temp name and renamed: several instances block on their
+	# own popups concurrently, and a plain > would let a second click
+	# truncate the first mid-read or clobber it before the bridge's 1s poll.
 	if [ -n "$route" ]; then
-		printf '%s|%s' "$(date +%s)" "$route" >"$RUNTIME_DIR/.click"
+		printf '%s|%s' "$(date +%s)" "$route" >"$RUNTIME_DIR/.click.$$"
 	else
-		printf '%s|action:%s' "$(date +%s)" "$ingame_action" >"$RUNTIME_DIR/.click"
+		printf '%s|action:%s' "$(date +%s)" "$ingame_action" >"$RUNTIME_DIR/.click.$$"
 	fi
+	mv -f "$RUNTIME_DIR/.click.$$" "$RUNTIME_DIR/.click"
 	;;
 esac
 exit 0

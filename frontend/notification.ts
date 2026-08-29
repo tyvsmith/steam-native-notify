@@ -42,6 +42,9 @@ export function takeToastBrowserInfo(): unknown {
  * delivered, just without a route.
  */
 export function notificationFromToast(win: Window): DecodedNotification | null {
+	// Declared outside the try: a throw on a fiber ABOVE the notification must
+	// not discard an already-decoded result.
+	let decoded: DecodedNotification | null = null;
 	try {
 		const doc = win.document;
 		if (!doc) return null;
@@ -62,16 +65,25 @@ export function notificationFromToast(win: Window): DecodedNotification | null {
 		// context provider ABOVE the toast component -- as the provider's
 		// `value` (the popup object with params.browserInfo) or as plain props
 		// higher up. Returning early would miss it.
-		let decoded: DecodedNotification | null = null;
 		let fiber: any = (node as any)[key];
 		for (let depth = 0; fiber && depth < 30; depth++) {
 			const props = fiber.memoizedProps ?? fiber.pendingProps;
-			const bi =
-				props?.browserInfo ??
-				props?.params?.browserInfo ??
-				props?.value?.params?.browserInfo ??
-				props?.value?.browserInfo;
-			if (bi && typeof bi === 'object') foundBrowserInfo = bi;
+			// Guarded separately: a provider whose value has a throwing getter
+			// must not take down an already-decoded notification, and the
+			// FIRST hit wins -- the nearest provider is the toast's own
+			// context; an outer browserInfo-shaped object is not.
+			if (!foundBrowserInfo) {
+				try {
+					const bi =
+						props?.browserInfo ??
+						props?.params?.browserInfo ??
+						props?.value?.params?.browserInfo ??
+						props?.value?.browserInfo;
+					if (bi && typeof bi === 'object') foundBrowserInfo = bi;
+				} catch {
+					/* a hostile getter on some provider; keep walking */
+				}
+			}
 
 			const notification = props?.notification;
 			if (!decoded && notification && typeof notification === 'object') {
@@ -117,7 +129,8 @@ export function notificationFromToast(win: Window): DecodedNotification | null {
 		}
 		return decoded;
 	} catch {
-		/* a toast that cannot be read still gets delivered, just without a route */
+		/* a toast that cannot be fully read still gets delivered; whatever
+		   decoded before the throw survives */
 	}
-	return null;
+	return decoded;
 }

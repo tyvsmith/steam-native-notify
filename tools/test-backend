@@ -297,13 +297,29 @@ printf %%s "$n" > %s/count
 exit 0
 ]]):format(shim_dir, shim_dir))
 	shim:close()
-	io.popen("chmod +x '" .. shim_dir .. "/notify-send'"):close()
+	-- gdbus shimmed to FAIL: the daemon is absent, so retries must proceed.
+	local gdbus = assert(io.open(shim_dir .. "/gdbus", "w"))
+	gdbus:write("#!/bin/sh\nexit 1\n")
+	gdbus:close()
+	io.popen("chmod +x '" .. shim_dir .. "/notify-send' '" .. shim_dir .. "/gdbus'"):close()
 	io.popen("NOTIFY_ACTION_RETRY_DELAY=0 PATH='" .. shim_dir .. "':\"$PATH\" "
 		.. root .. "/tools/notify-action 'Retry Test' 'body' '' ''; echo done"):read("*a")
 	local count_handle = io.open(shim_dir .. "/count", "r")
 	local count = count_handle and count_handle:read("*a") or "(no shim calls)"
 	if count_handle then count_handle:close() end
 	check("delivery retried through daemon absence", count == "3", tostring(count))
+
+	-- With the daemon REACHABLE (gdbus succeeds), a notify-send failure is not
+	-- absence and must NOT be retried: retrying could re-deliver a toast that
+	-- failed after display.
+	io.popen("rm -f '" .. shim_dir .. "/count'; printf '#!/bin/sh\\nexit 0\\n' > '"
+		.. shim_dir .. "/gdbus'; chmod +x '" .. shim_dir .. "/gdbus'"):close()
+	io.popen("NOTIFY_ACTION_RETRY_DELAY=0 PATH='" .. shim_dir .. "':\"$PATH\" "
+		.. root .. "/tools/notify-action 'Retry Test' 'body' '' ''; echo done"):read("*a")
+	count_handle = io.open(shim_dir .. "/count", "r")
+	count = count_handle and count_handle:read("*a") or "(no shim calls)"
+	if count_handle then count_handle:close() end
+	check("no retry while the daemon is reachable", count == "1", tostring(count))
 	io.popen("rm -rf '" .. shim_dir .. "'"):close()
 else
 	print("  skip delivery retry (mktemp failed)")

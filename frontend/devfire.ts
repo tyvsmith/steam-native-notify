@@ -91,6 +91,17 @@ function injectServerNotification(type: number, body: unknown): void {
  * uses.
  */
 async function runOverlayProbe(probe: { call?: string; appid?: number; url?: string }): Promise<void> {
+	try {
+		await runOverlayProbeInner(probe);
+	} catch (e) {
+		// Fired with `void` from the poll: a rejection here would otherwise
+		// escape as an unhandled rejection with no log line -- exactly when
+		// the probes matter (a post-update API reshuffle).
+		dlog(`overlay probe failed: ${(e as Error)?.message ?? e}`);
+	}
+}
+
+async function runOverlayProbeInner(probe: { call?: string; appid?: number; url?: string }): Promise<void> {
 	switch (probe.call) {
 		case 'info': {
 			const sc: any = Reflect.get(globalThis, 'SteamClient');
