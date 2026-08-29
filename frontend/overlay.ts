@@ -78,10 +78,35 @@ export function openInOverlay(appid: number, url: string): boolean {
 
 /**
  * Open one of the handler's named dialogs in the overlay -- the SDK's
- * ActivateGameOverlay vocabulary ("settings", "friends", "community", ...).
- * Note "settings" is hard-wired to Settings("System") in the handler, which
- * is exactly where a SystemUpdate click goes.
+ * ActivateGameOverlay vocabulary ("settings", "friends", "community",
+ * "requestplaytime", ...). Note "settings" is hard-wired to
+ * Settings("System") in the handler, which is exactly where a SystemUpdate
+ * click goes.
  */
 export function openDialogInOverlay(appid: number, dialog: string): boolean {
 	return sendOverlayRequest(appid, false, dialog);
+}
+
+/**
+ * Open the overlay's Recordings & Screenshots view. The activate-overlay
+ * ingestion has no media case; Steam's own in-game screenshot toast click
+ * navigates its overlay context to the media grid, and the same navigator is
+ * reachable here through the store's GetNavigator.
+ */
+export function openMediaInOverlay(appid: number): boolean {
+	const store = findOverlayStore();
+	if (!store) return false;
+	try {
+		const nav = store.GetNavigator({ unRequestingAppID: appid });
+		if (typeof nav?.Media?.Grid !== 'function') {
+			dlog('overlay: navigator has no Media.Grid');
+			return false;
+		}
+		dlog(`overlay: media appid=${appid}`);
+		nav.Media.Grid();
+		return true;
+	} catch (e) {
+		dlog(`overlay: media failed: ${(e as Error)?.message ?? e}`);
+		return false;
+	}
 }

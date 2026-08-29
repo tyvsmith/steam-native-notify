@@ -7,16 +7,18 @@
 # plugin backend for the notification's lifetime and serialise every
 # notification behind the last one.
 #
-# Usage: notify-action <title> <body> [image] [steam-url]
-#        notify-action --resolve-icon <url>       print the resolved icon path
-#        notify-action --click-plan <steam-url>   print what a click would run
-#        notify-action --escape-markup <text>     print the escaped form
-#        notify-action --daemon-caps              body-markup | plain
+# Usage: notify-action <title> <body> [image] [steam-url] [ingame-action]
+#        notify-action --resolve-icon <url>              print the resolved icon path
+#        notify-action --click-plan <steam-url> [action] print what a click would run
+#        notify-action --escape-markup <text>            print the escaped form
+#        notify-action --daemon-caps                     body-markup | plain
 #
 # <body> arrives raw; markup escaping happens here, immediately before the
-# notify-send that renders it. The four positional arguments are a contract
-# shared with backend/main.lua (which builds the invocation) and
-# tools/test-backend (which asserts it); adding a fifth costs three edits.
+# notify-send that renders it. <ingame-action> is a token for types whose
+# desktop route is null but whose in-game click does something (see
+# frontend/routes.ts clientOverlayAction). The five positional arguments are
+# a contract shared with backend/main.lua (which builds the invocation) and
+# tools/test-backend (which asserts it).
 
 set -u
 
@@ -39,6 +41,7 @@ title=${1:-Steam}
 body=${2:-}
 image=${3:-}
 route=${4:-}
+ingame_action=${5:-}
 
 # A daemon that advertises `body-markup` parses the body as markup, and a
 # bare `<` or `&` from a chat message would be swallowed or mangled. Only the
@@ -146,6 +149,13 @@ game_running() {
 }
 
 click_plan() {
+	# An in-game action token (Screenshot -> media, PlaytimeWarning ->
+	# requestplaytime) only means anything while a game is running; on the
+	# desktop these types mirror Steam by doing nothing.
+	if [ -n "${2:-}" ] && game_running; then
+		echo overlay-action
+		return
+	fi
 	case ${1:-} in
 	"") echo none ;;
 	steam://friends/message/*) echo route ;;
@@ -168,7 +178,7 @@ if [ "${1:-}" = "--resolve-icon" ]; then
 fi
 
 if [ "${1:-}" = "--click-plan" ]; then
-	click_plan "${2:-}"
+	click_plan "${2:-}" "${3:-}"
 	exit 0
 fi
 
@@ -206,11 +216,11 @@ done
 
 [ "$chosen" = "$ACTION" ] || exit 0
 
-# No route means Steam itself does nothing for this notification, so neither
-# does this. Dismissing is the whole behaviour.
-[ -n "$route" ] || exit 0
+# Neither a route nor an in-game action means Steam itself does nothing for
+# this notification, so neither does this. Dismissing is the whole behaviour.
+[ -n "$route" ] || [ -n "$ingame_action" ] || exit 0
 
-case $(click_plan "$route") in
+case $(click_plan "$route" "$ingame_action") in
 route)
 	steam "$route" >/dev/null 2>&1 &
 	;;
@@ -222,6 +232,9 @@ activate+route)
 	;;
 overlay)
 	printf '%s' "$route" >"$RUNTIME_DIR/.click"
+	;;
+overlay-action)
+	printf 'action:%s' "$ingame_action" >"$RUNTIME_DIR/.click"
 	;;
 esac
 exit 0

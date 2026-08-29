@@ -69,6 +69,25 @@ function pendingInvitesUrl(): string | null {
 	return community && my ? `${community}${my}/friends/pending` : null;
 }
 
+/**
+ * In-game-only actions for client types whose DESKTOP route is null but whose
+ * in-game toast click does something Steam-observable. Tokens name overlay
+ * doors, not URLs; the click bridge maps them (clickbridge.ts -> overlay.ts).
+ * Observed 2026-08-29 in Helldivers 2: Steam's own in-game Screenshot click
+ * opens the Recordings & Screenshots view; PlaytimeWarning pops the playtime
+ * request dialog (the overlay ingestion's "requestplaytime" case).
+ */
+export function clientOverlayAction(type: number): string | null {
+	switch (type) {
+		case 14: // Screenshot -> overlay media grid
+			return 'media';
+		case 45: // PlaytimeWarning -> overlay playtime request dialog
+			return 'requestplaytime';
+		default:
+			return null;
+	}
+}
+
 /** Client-sourced notifications, fields decoded via the schema. */
 export function clientRoute(type: number, fields: Record<string, PbValue>): string | null {
 	switch (type) {

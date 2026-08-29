@@ -1,6 +1,6 @@
 import { callable } from 'millennium';
 import { dlog } from './log';
-import { openDialogInOverlay, openInOverlay, runningOverlayAppId } from './overlay';
+import { openDialogInOverlay, openInOverlay, openMediaInOverlay, runningOverlayAppId } from './overlay';
 
 /**
  * The in-game click bridge. With a game running, a desktop notification's
@@ -62,11 +62,19 @@ export function armClickBridge(): void {
 				// SystemUpdate and HardwareUpdate (observed 2026-08-29), so
 				// both settings routes map here.
 				opened = openDialogInOverlay(appid, 'settings');
+			} else if (route === 'action:media') {
+				// Screenshot: the Recordings & Screenshots view, where Steam's
+				// own in-game click goes.
+				opened = openMediaInOverlay(appid);
+			} else if (route === 'action:requestplaytime') {
+				// PlaytimeWarning: the playtime request dialog, via the
+				// ingestion's own case.
+				opened = openDialogInOverlay(appid, 'requestplaytime');
 			} else {
 				dlog(`click-bridge: unbridgeable route ${route}`);
 				return;
 			}
-			if (!opened) dlog('click-bridge: overlay store not found');
+			if (!opened) dlog('click-bridge: overlay door failed');
 		} catch (e) {
 			dlog(`click-bridge failed: ${(e as Error)?.message ?? e}`);
 		}

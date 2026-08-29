@@ -80,17 +80,18 @@ function Notify(payload)
     local body = data.body or ""
     local raw_image = type(data.image) == "string" and data.image or ""
     local route = type(data.route) == "string" and data.route or ""
+    local ingame = type(data.ingame) == "string" and data.ingame or ""
 
     -- This end is a marshaller: quote and hand over. Everything the daemon
     -- needs done to the values (markup escaping, icon resolution, the click)
     -- happens in the helper, next to the notify-send that renders them. The
-    -- four positional arguments are a contract shared with tools/notify-action
+    -- five positional arguments are a contract shared with tools/notify-action
     -- and tools/test-backend. A missing helper was already reported loudly at
     -- load; delivering without it would mean a second, untested notify-send.
     local command = table.concat({
         "sh",
         shell_quote(HELPER),
-        shell_quote(title), shell_quote(body), shell_quote(raw_image), shell_quote(route),
+        shell_quote(title), shell_quote(body), shell_quote(raw_image), shell_quote(route), shell_quote(ingame),
         ">/dev/null 2>&1 &",
     }, " ")
 

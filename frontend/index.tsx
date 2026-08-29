@@ -1,6 +1,6 @@
 import { callable, definePlugin, IconsModule } from 'millennium';
 import { typeName } from './generated/notifications';
-import { clientRoute, serverRoute } from './routes';
+import { clientOverlayAction, clientRoute, serverRoute } from './routes';
 import { notificationFromToast, type DecodedNotification } from './notification';
 import { setIdentity } from './identity';
 import { loadUrlTemplates } from './urlstore';
@@ -157,11 +157,13 @@ function deliverToast(win: Window, name: string, text: string): void {
 	const fromToast = notificationFromToast(win);
 
 	let route: string | null = null;
+	let ingame: string | null = null;
 	let kind: string | undefined;
 	try {
 		if (fromToast) {
 			kind = typeName(fromToast.type);
 			route = routeFor(fromToast);
+			if (fromToast.source === 'client') ingame = clientOverlayAction(fromToast.type);
 			const detail =
 				fromToast.source === 'server'
 					? `server type=${fromToast.server.type} url=${fromToast.server.url ?? ''} body=${safeJson(fromToast.server.body)}`
@@ -171,9 +173,10 @@ function deliverToast(win: Window, name: string, text: string): void {
 	} catch (e) {
 		dlog(`from-toast ${name} failed: ${(e as Error)?.message ?? e}`);
 		route = null;
+		ingame = null;
 	}
-	dlog(`toast ${name} -> ${safeJson({ title, body, image, kind, route })}`);
-	void notify({ payload: safeJson({ title, body, image, route }) });
+	dlog(`toast ${name} -> ${safeJson({ title, body, image, kind, route, ingame })}`);
+	void notify({ payload: safeJson({ title, body, image, route, ingame }) });
 
 	// In-game, notify-action delivers the click back through a file instead of
 	// a steam:// URL; arm the bridge that picks it up (clickbridge.ts).

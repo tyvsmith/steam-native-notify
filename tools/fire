@@ -77,6 +77,21 @@ if [[ $1 == --overlay-activate ]]; then
   exit 0
 fi
 
+if [[ $1 == --overlay-dialog ]]; then
+  appid="${2:?--overlay-dialog needs an appid}"
+  dialog="${3:?--overlay-dialog needs a dialog name (settings, requestplaytime, friends, ...)}"
+  printf '{"overlay":{"call":"dialog","appid":%s,"url":"%s"}}\n' "$appid" "$dialog" >"$RUNTIME_DIR/.dev-fire"
+  echo "queued: overlay dialog appid=$appid $dialog"
+  exit 0
+fi
+
+if [[ $1 == --overlay-media ]]; then
+  appid="${2:?--overlay-media needs an appid}"
+  printf '{"overlay":{"call":"media","appid":%s}}\n' "$appid" >"$RUNTIME_DIR/.dev-fire"
+  echo "queued: overlay media appid=$appid"
+  exit 0
+fi
+
 if [[ $1 == --server ]]; then
   type="${2:?--server needs a numeric ESteamNotificationType}"
   body="${3:-{\}}"

@@ -238,9 +238,9 @@ check("survives an undecodable payload", ok)
 -- running, when raising the desktop client would pull the player out of the
 -- game. The game check is pinned via NOTIFY_ACTION_GAME so the tests do not
 -- depend on whether a game happens to be running.
-local function click_plan(route, game)
+local function click_plan(route, game, action)
 	local handle = io.popen("NOTIFY_ACTION_GAME=" .. (game or "no") .. " "
-		.. root .. "/tools/notify-action --click-plan '" .. route .. "'")
+		.. root .. "/tools/notify-action --click-plan '" .. route .. "' '" .. (action or "") .. "'")
 	local plan = handle:read("*l")
 	handle:close()
 	return plan
@@ -255,6 +255,8 @@ check("click plan: in-game system settings goes to the overlay bridge", click_pl
 check("click plan: in-game controller settings goes to the overlay bridge", click_plan("steam://settings/controller", "yes") == "overlay")
 check("click plan: in-game nav route is inert", click_plan("steam://nav/games/details/570", "yes") == "none")
 check("click plan: in-game chat route unchanged", click_plan("steam://friends/message/76561198000000000", "yes") == "route")
+check("click plan: in-game action token goes to the action bridge", click_plan("", "yes", "media") == "overlay-action")
+check("click plan: desktop action token stays inert", click_plan("", "no", "media") == "none")
 
 -- notify-action's markup escaping: the daemon parses the body as markup, so
 -- what the helper hands notify-send must have &, <, > entity-escaped.

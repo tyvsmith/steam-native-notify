@@ -1,7 +1,7 @@
 import { callable, findModuleExport } from 'millennium';
 import { dlog, safeJson } from './log';
 import { parseCallableJson, settings } from './settings';
-import { findOverlayStore, openInOverlay } from './overlay';
+import { findOverlayStore, openDialogInOverlay, openInOverlay, openMediaInOverlay } from './overlay';
 
 /**
  * The tools/fire door: dev machinery, fenced off from the capture path.
@@ -112,6 +112,18 @@ async function runOverlayProbe(probe: { call?: string; pid?: number; appid?: num
 		case 'activate': {
 			if (!openInOverlay(probe.appid ?? 0, probe.url ?? '')) {
 				dlog('overlay probe: store not found');
+			}
+			return;
+		}
+		case 'dialog': {
+			if (!openDialogInOverlay(probe.appid ?? 0, probe.url ?? '')) {
+				dlog('overlay probe: store not found');
+			}
+			return;
+		}
+		case 'media': {
+			if (!openMediaInOverlay(probe.appid ?? 0)) {
+				dlog('overlay probe: media door failed');
 			}
 			return;
 		}
