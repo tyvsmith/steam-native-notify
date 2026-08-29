@@ -183,17 +183,28 @@ function deliverToast(win: Window, name: string, text: string): void {
 		route = null;
 		ingame = null;
 	}
-	dlog(`toast ${name} -> ${safeJson({ title, body, image, kind, route, ingame })}`);
-	void notify({ payload: safeJson({ title, body, image, route, ingame }) });
+	// An overlay-context toast is one Steam already showed inside the focused
+	// game. With nativeToastInGame on, that toast is the notification: nothing
+	// is sent to the desktop and Steam's popup is left alone (hideSteamToast
+	// included). The capture and logs above still run, so tools/capture and
+	// the observability contract are unchanged.
+	const suppressed = overlayCtx && settings().nativeToastInGame;
+	dlog(
+		`toast ${name} -> ${safeJson({ title, body, image, kind, route, ingame })}` +
+			(suppressed ? ' (suppressed: native in-game)' : ''),
+	);
+	if (!suppressed) void notify({ payload: safeJson({ title, body, image, route, ingame }) });
 
 	// notify-action delivers every click back through a file; arm the bridge
 	// that picks it up and chooses the surface by live focus (clickbridge.ts).
+	// A suppressed toast arms it too: arming only ever extends the window, and
+	// an earlier desktop notification may still be waiting for its click.
 	armClickBridge();
 
 	// Closing Steam's own popup is what stops a notification being reported
 	// twice. Done here rather than with a compositor rule because the plugin
 	// knows the read succeeded, and because it works on any window manager.
-	if (settings().hideSteamToast) {
+	if (settings().hideSteamToast && !suppressed) {
 		try {
 			win.close();
 		} catch (e) {

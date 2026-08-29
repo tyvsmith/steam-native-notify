@@ -11,6 +11,13 @@ export interface Settings {
 	/** Close Steam's own toast once its text has been read. */
 	hideSteamToast: boolean;
 	/**
+	 * Leave overlay-context toasts alone: while a game has focus, Steam's own
+	 * in-game toast stays as-is and no desktop notification is sent (nor is
+	 * the toast closed, whatever hideSteamToast says). Desktop-context toasts
+	 * are unaffected.
+	 */
+	nativeToastInGame: boolean;
+	/**
 	 * Accept commands from tools/fire (devfire.ts). A name-and-args door into
 	 * Steam's notification stores for anything that can write the command file
 	 * in the plugin's cache directory, so it ships off.
@@ -18,7 +25,7 @@ export interface Settings {
 	devFire: boolean;
 }
 
-const DEFAULTS: Settings = { hideSteamToast: false, devFire: false };
+const DEFAULTS: Settings = { hideSteamToast: false, nativeToastInGame: false, devFire: false };
 
 /**
  * Read by the toast handler on every notification, so the toggle takes effect

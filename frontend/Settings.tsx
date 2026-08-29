@@ -7,12 +7,14 @@ import { loadSettings, settings, updateSettings } from './settings';
 export function SettingsPanel() {
 	const { useState, useEffect } = window.SP_REACT;
 	const [hide, setHide] = useState(settings().hideSteamToast);
+	const [nativeInGame, setNativeInGame] = useState(settings().nativeToastInGame);
 	const [devFire, setDevFire] = useState(settings().devFire);
 
 	useEffect(() => {
 		// The panel can be opened before the stored value has been read back.
 		void loadSettings().then((s) => {
 			setHide(s.hideSteamToast);
+			setNativeInGame(s.nativeToastInGame);
 			setDevFire(s.devFire);
 		});
 	}, []);
@@ -30,6 +32,19 @@ export function SettingsPanel() {
 				onChange={(value: boolean) => {
 					setHide(value);
 					void updateSettings({ hideSteamToast: value });
+				}}
+			/>
+			<ToggleField
+				label="Keep Steam's own toasts while in a game"
+				description={
+					'While a game is running, Steam’s in-game toast is left as-is and no ' +
+					'desktop notification is sent. Out of a game, desktop notifications ' +
+					'work as normal.'
+				}
+				checked={nativeInGame}
+				onChange={(value: boolean) => {
+					setNativeInGame(value);
+					void updateSettings({ nativeToastInGame: value });
 				}}
 			/>
 			<ToggleField
