@@ -18,10 +18,13 @@ The build packs and installs
 `~/.local/share/millennium/plugins/me.tysmith.steam-native-notify.star`
 (starlight `output_path = "auto"`); there is no separate install step.
 
-**A full Steam restart is required for any frontend change.** `plugin.restart`
-and disable/enable reload only the Lua backend; the old frontend stays loaded
-while the log still prints "Delegating frontend load", which looks fine and is
-not.
+**A full Steam restart is required for ANY change, backend included.** Under
+the .star format `plugin.restart` and disable/enable leave the backend
+STOPPED — the log shows "backend loaded" then "backend unloaded" immediately,
+`tools/mep plugin.status name=me.tysmith.steam-native-notify` reports
+`running: false`, and `.dev-fire` sits unconsumed. Only a full Steam restart
+recovers it. The frontend was already unreloadable ("Delegating frontend
+load" logs and does not execute).
 
 ```sh
 steam -shutdown && sleep 15 && setsid uwsm-app -- gtk-launch steam.desktop

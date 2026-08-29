@@ -33,7 +33,7 @@ The build packs the plugin into
 `~/.local/share/millennium/plugins/me.tysmith.steam-native-notify.star`, so
 building is installing. Restart Steam, then enable **Steam Native Notify**
 under Millennium > Plugins. After rebuilding, restart Steam fully:
-`plugin.restart` and disable/enable do not reload the frontend.
+`plugin.restart` and disable/enable leave the plugin stopped.
 
 Runtime dependencies: `notify-send`, `curl`, `steam`, `sh`.
 

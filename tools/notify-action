@@ -140,8 +140,19 @@ icon=$(resolve_icon "$image")
 body=$(escape_markup "$body")
 
 # Blocks here. On a click the action name is printed; on dismissal, nothing is.
-chosen=$(notify-send -a "$APP_NAME" -i "$icon" -t "$EXPIRE" \
-	-A "$ACTION=Open" "$title" "$body" 2>/dev/null)
+#
+# The daemon can be briefly absent -- at login the backend can deliver before
+# the session's daemon owns the bus name (observed: a fire 24s after login was
+# lost), and a daemon restart drops it too. notify-send fails fast and
+# silently then, so retry for ~30s rather than lose the notification; a
+# machine with no daemon at all gives up quietly.
+tries=0
+until chosen=$(notify-send -a "$APP_NAME" -i "$icon" -t "$EXPIRE" \
+	-A "$ACTION=Open" "$title" "$body" 2>/dev/null); do
+	tries=$((tries + 1))
+	[ "$tries" -lt 10 ] || exit 1
+	sleep "${NOTIFY_ACTION_RETRY_DELAY:-3}"
+done
 
 [ "$chosen" = "$ACTION" ] || exit 0
 

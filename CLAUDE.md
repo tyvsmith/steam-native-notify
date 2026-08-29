@@ -49,9 +49,11 @@ by `me.tysmith.steam-native-notify`.
 
 ## Hard constraints
 
-**A full Steam restart is required for any frontend change.** `plugin.restart`
-and disable/enable reload the Lua backend but leave the frontend loaded and not
-executing, while still logging "Delegating frontend load".
+**A full Steam restart is required for ANY change, backend included.** Under
+the .star format, `plugin.restart` and disable/enable leave the backend
+stopped (`running: false`, immediate "backend unloaded" after load); the
+frontend was already unreloadable ("Delegating frontend load" logs and does
+not execute).
 
 ```sh
 steam -shutdown && sleep 15 && setsid uwsm-app -- gtk-launch steam.desktop

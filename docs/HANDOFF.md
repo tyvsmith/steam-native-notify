@@ -44,10 +44,12 @@ loader lines (capture's freshness stamp).
 
 These cost hours to learn. Ignoring them will cost them again.
 
-**A full Steam restart is required for any frontend change.** `plugin.restart`
-and disable/enable reload the Lua backend but leave the frontend loaded and not
-executing. The log still says "Delegating frontend load", which looks fine and
-is not. Use:
+**A full Steam restart is required for ANY change, backend included.** Under
+the packed .star format, `plugin.restart` and disable/enable leave the backend
+STOPPED: the new backend logs "backend loaded" then "backend unloaded"
+immediately, `plugin.status` reports `running: false`, and dev fires queue
+unconsumed (observed 2026-08-29). The frontend half was already unreloadable
+("Delegating frontend load" logs and does not execute). Use:
 
 ```sh
 steam -shutdown && sleep 15 && setsid uwsm-app -- gtk-launch steam.desktop

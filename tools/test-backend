@@ -265,6 +265,35 @@ check("resolve-icon: missing absolute path falls back",
 check("resolve-icon: garbage falls back",
 	resolved_icon("not a url at all") == "steam")
 
+-- Delivery retry: at login the helper can run before the session's daemon
+-- owns the bus name, and notify-send fails fast. A PATH shim fails twice and
+-- succeeds on the third call; the helper must retry through the failures and
+-- deliver exactly once.
+local shim_handle = io.popen("mktemp -d")
+local shim_dir = shim_handle:read("*l")
+shim_handle:close()
+if shim_dir and shim_dir ~= "" then
+	local shim = assert(io.open(shim_dir .. "/notify-send", "w"))
+	shim:write(([[#!/bin/sh
+n=$(cat %s/count 2>/dev/null || echo 0)
+n=$((n + 1))
+printf %%s "$n" > %s/count
+[ "$n" -ge 3 ] || exit 1
+exit 0
+]]):format(shim_dir, shim_dir))
+	shim:close()
+	io.popen("chmod +x '" .. shim_dir .. "/notify-send'"):close()
+	io.popen("NOTIFY_ACTION_RETRY_DELAY=0 PATH='" .. shim_dir .. "':\"$PATH\" "
+		.. root .. "/tools/notify-action 'Retry Test' 'body' '' ''; echo done"):read("*a")
+	local count_handle = io.open(shim_dir .. "/count", "r")
+	local count = count_handle and count_handle:read("*a") or "(no shim calls)"
+	if count_handle then count_handle:close() end
+	check("delivery retried through daemon absence", count == "3", tostring(count))
+	io.popen("rm -rf '" .. shim_dir .. "'"):close()
+else
+	print("  skip delivery retry (mktemp failed)")
+end
+
 os.execute = real_execute
 os.getenv = real_getenv
 if tmp_cache:find("^/tmp/") then os.execute("rm -rf '" .. tmp_cache .. "'") end
