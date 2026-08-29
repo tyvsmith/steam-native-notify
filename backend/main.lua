@@ -81,19 +81,18 @@ function Notify(payload)
     local raw_image = type(data.image) == "string" and data.image or ""
     local route = type(data.route) == "string" and data.route or ""
     local ingame = type(data.ingame) == "string" and data.ingame or ""
-    local ctx = type(data.ctx) == "string" and data.ctx or ""
 
     -- This end is a marshaller: quote and hand over. Everything the daemon
     -- needs done to the values (markup escaping, icon resolution, the click)
     -- happens in the helper, next to the notify-send that renders them. The
-    -- six positional arguments are a contract shared with tools/notify-action
+    -- five positional arguments are a contract shared with tools/notify-action
     -- and tools/test-backend. A missing helper was already reported loudly at
     -- load; delivering without it would mean a second, untested notify-send.
     local command = table.concat({
         "sh",
         shell_quote(HELPER),
         shell_quote(title), shell_quote(body), shell_quote(raw_image),
-        shell_quote(route), shell_quote(ingame), shell_quote(ctx),
+        shell_quote(route), shell_quote(ingame),
         ">/dev/null 2>&1 &",
     }, " ")
 
@@ -196,10 +195,10 @@ function TakeDevCommand()
     return consume(RUNTIME_DIR .. "/.dev-fire")
 end
 
---- In-game click handoff: with a game running, notify-action writes the
---- clicked route to RUNTIME_DIR/.click instead of invoking a steam:// URL
---- (which would raise the desktop client over the game); the frontend's
---- click bridge polls this and opens the route in the overlay browser.
+--- Click handoff: notify-action writes every clicked route (or action token)
+--- to RUNTIME_DIR/.click instead of invoking a steam:// URL (which would
+--- raise the desktop client over a focused game); the frontend's click
+--- bridge polls this and opens it on the surface live focus picks.
 ---@ffi
 ---@return string
 function TakeClick()

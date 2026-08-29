@@ -156,9 +156,13 @@ function deliverToast(win: Window, name: string, text: string): void {
 	const { title, body } = split(text);
 	const image = toastImage(win);
 	const fromToast = notificationFromToast(win);
+	// Steam renders each toast in the surface the user is on: overlay-context
+	// names (notificationtoasts_uid<appid>-...) mean the game was focused,
+	// _desktop names mean it was not -- even with a game running.
+	const overlayCtx = name.startsWith('notificationtoasts_uid');
 	// The walk also surfaces the toast's per-surface browserInfo, which the
 	// chat dialogs key on; stash it for the click bridge (overlay.ts).
-	rememberToastContext(name.startsWith('notificationtoasts_uid'), takeToastBrowserInfo());
+	rememberToastContext(overlayCtx, takeToastBrowserInfo());
 
 	let route: string | null = null;
 	let ingame: string | null = null;
@@ -179,17 +183,11 @@ function deliverToast(win: Window, name: string, text: string): void {
 		route = null;
 		ingame = null;
 	}
-	// Steam renders each toast in the surface the user is on: overlay-context
-	// names (notificationtoasts_uid<appid>-...) mean the game was focused,
-	// _desktop names mean it was not -- even with a game running. The click
-	// follows the same decision (observed: Steam's own desktop-context toast
-	// click opens the window, not the overlay, while a game runs unfocused).
-	const ctx = name.startsWith('notificationtoasts_uid') ? 'overlay' : '';
-	dlog(`toast ${name} -> ${safeJson({ title, body, image, kind, route, ingame, ctx })}`);
-	void notify({ payload: safeJson({ title, body, image, route, ingame, ctx }) });
+	dlog(`toast ${name} -> ${safeJson({ title, body, image, kind, route, ingame })}`);
+	void notify({ payload: safeJson({ title, body, image, route, ingame }) });
 
-	// In-game, notify-action delivers the click back through a file instead of
-	// a steam:// URL; arm the bridge that picks it up (clickbridge.ts).
+	// notify-action delivers every click back through a file; arm the bridge
+	// that picks it up and chooses the surface by live focus (clickbridge.ts).
 	armClickBridge();
 
 	// Closing Steam's own popup is what stops a notification being reported

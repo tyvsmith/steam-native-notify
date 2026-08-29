@@ -7,18 +7,16 @@
 # plugin backend for the notification's lifetime and serialise every
 # notification behind the last one.
 #
-# Usage: notify-action <title> <body> [image] [steam-url] [ingame-action] [ctx]
-#        notify-action --resolve-icon <url>                    print the resolved icon path
-#        notify-action --click-plan <steam-url> [action] [ctx] print what a click would run
-#        notify-action --escape-markup <text>                  print the escaped form
-#        notify-action --daemon-caps                           body-markup | plain
+# Usage: notify-action <title> <body> [image] [steam-url] [ingame-action]
+#        notify-action --resolve-icon <url>              print the resolved icon path
+#        notify-action --click-plan <steam-url> [action] print what a click would run
+#        notify-action --escape-markup <text>            print the escaped form
+#        notify-action --daemon-caps                     body-markup | plain
 #
 # <body> arrives raw; markup escaping happens here, immediately before the
 # notify-send that renders it. <ingame-action> is a token for types whose
 # desktop route is null but whose in-game click does something (see
-# frontend/routes.ts clientOverlayAction). <ctx> is "overlay" when Steam
-# rendered its own toast in the game overlay's context -- Steam's per-focus
-# decision, which the click follows. The six positional arguments are a
+# frontend/routes.ts clientOverlayAction). The five positional arguments are a
 # contract shared with backend/main.lua (which builds the invocation) and
 # tools/test-backend (which asserts it).
 
@@ -44,7 +42,6 @@ body=${2:-}
 image=${3:-}
 route=${4:-}
 ingame_action=${5:-}
-ctx=${6:-}
 
 # A daemon that advertises `body-markup` parses the body as markup, and a
 # bare `<` or `&` from a chat message would be swallowed or mangled. Only the
@@ -121,57 +118,27 @@ resolve_icon() {
 	fi
 }
 
-# A click must both surface the client and navigate it. Steam's own nav,
-# openurl and settings handlers never raise a window -- Steam's toasts are only
-# clickable while Steam is focused, so its code never needed to -- and an
-# argless `steam` is the launcher-activation path: the running client shows and
-# focuses its main window itself, on any window manager. Sequenced so
-# activation lands before the route, and so a client that has to boot first
-# boots, then navigates.
+# Every click rides the bridge: the payload (route or action token) is written
+# to a click file that the plugin's click bridge (frontend/clickbridge.ts)
+# consumes from inside Steam, where live state picks the surface. Only the
+# bridge can: it checks which game window is focused at click time and opens
+# the overlay doors for that game, or raises the desktop window (creating it
+# via steam://open/main when closed to the tray) and navigates through the
+# client's own URL executor. An external steam:// invocation from here cannot
+# make that choice: the client's handlers pick the overlay whenever a game is
+# merely RUNNING, and raise the main window over a focused game.
 #
-# Chat routes are the exception: the client's friends/message handler passes
-# btakefocus=1 and force-focuses the chat window itself. Raising the main
-# window at the same time could bury the dialog the click just opened.
-#
-# The focused game is the other exception. Steam renders each toast in the
-# surface the user is on -- overlay context when the game is focused, desktop
-# context otherwise, even with a game running -- and its click behaves
-# accordingly: overlay-context clicks stay in the overlay, desktop-context
-# clicks open the client window (both observed 2026-08-29, Helldivers 2).
-# The ctx argument carries Steam's own decision, so no process or focus
-# detection happens here. In overlay context, NO steam:// URL stays in-game
-# (even a bare openurl raises the desktop client over the game), so
-# bridgeable clicks are written to a click file the plugin's click bridge
-# opens through Steam's own activate-overlay ingestion; nav routes are inert
-# in-game (Steam's own in-game DownloadCompleted click does nothing).
-in_overlay() {
-	[ "${1:-}" = "overlay" ]
-}
-
+# The one accepted loss: the bridge dies with Steam, so a click landing after
+# Steam has fully quit does nothing, where the old external `steam` invocation
+# could boot the client. The popup, and with it the click, only survives ~8s
+# on this daemon, so that window is rare enough to document rather than keep a
+# second delivery path for.
 click_plan() {
-	# Action tokens (Screenshot, clips, PlaytimeWarning) always ride the
-	# bridge, which picks the surface by live focus: the overlay doors when
-	# the game is focused, the same doors retargeted at the desktop instance
-	# otherwise -- Steam's own desktop clicks for these types act too.
-	if [ -n "${2:-}" ]; then
-		echo overlay-action
-		return
+	if [ -z "${1:-}" ] && [ -z "${2:-}" ]; then
+		echo none
+	else
+		echo overlay
 	fi
-	case ${1:-} in
-	"") echo none ;;
-	# Chat always rides the bridge: the client's URL handler opens the
-	# overlay chat whenever a game is RUNNING, focused or not -- and this
-	# side cannot know whether one is. The bridge checks live focus and
-	# picks the surface explicitly (overlay instance, desktop instance, or
-	# the proven URL path when no game runs).
-	steam://friends/message/*) echo overlay ;;
-	# Settings routes ride the bridge: the overlay ingestion's "settings"
-	# dialog opens Settings, which is where Steam's own in-game clicks land
-	# for BOTH SystemUpdate and HardwareUpdate (observed; the overlay runs
-	# the component's gamepad branch, which folds controller into Settings).
-	steam://openurl/* | steam://settings/*) in_overlay "${3:-}" && echo overlay || echo activate+route ;;
-	*) in_overlay "${3:-}" && echo none || echo activate+route ;;
-	esac
 }
 
 # Resolution is the fiddliest part and the easiest to get wrong silently, so it
@@ -182,7 +149,7 @@ if [ "${1:-}" = "--resolve-icon" ]; then
 fi
 
 if [ "${1:-}" = "--click-plan" ]; then
-	click_plan "${2:-}" "${3:-}" "${4:-}"
+	click_plan "${2:-}" "${3:-}"
 	exit 0
 fi
 
@@ -224,21 +191,13 @@ done
 # this notification, so neither does this. Dismissing is the whole behaviour.
 [ -n "$route" ] || [ -n "$ingame_action" ] || exit 0
 
-case $(click_plan "$route" "$ingame_action" "$ctx") in
-route)
-	steam "$route" >/dev/null 2>&1 &
-	;;
-activate+route)
-	{
-		steam
-		steam "$route"
-	} >/dev/null 2>&1 &
-	;;
+case $(click_plan "$route" "$ingame_action") in
 overlay)
-	printf '%s' "$route" >"$RUNTIME_DIR/.click"
-	;;
-overlay-action)
-	printf 'action:%s' "$ingame_action" >"$RUNTIME_DIR/.click"
+	if [ -n "$route" ]; then
+		printf '%s' "$route" >"$RUNTIME_DIR/.click"
+	else
+		printf 'action:%s' "$ingame_action" >"$RUNTIME_DIR/.click"
+	fi
 	;;
 esac
 exit 0

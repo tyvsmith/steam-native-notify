@@ -15,17 +15,16 @@ import {
 } from './overlay';
 
 /**
- * The click bridge: clicks that must pick their surface from inside Steam.
+ * The click bridge: every notification click is delivered through here.
  *
  * tools/notify-action writes the clicked route (or action token) to a click
- * file when the surface decision needs live state -- overlay-context toasts,
- * every chat click, every action token -- and this end consumes it, checks
- * which game window is focused RIGHT NOW (overlay.ts tracks the client's own
- * focus signal), and opens the destination on the right surface: the overlay
- * doors for the focused game, the same doors retargeted at the desktop
- * instance (appid 0) or the client's URL executor otherwise. External
- * steam:// URLs cannot do this: the client's handlers pick the overlay
- * whenever a game is running, and raise the main window over a focused game.
+ * file, and this end consumes it, checks which game window is focused RIGHT
+ * NOW (overlay.ts tracks the client's own focus signal), and opens the
+ * destination on the right surface: the overlay doors for the focused game,
+ * the same doors retargeted at the desktop instance (appid 0) or the client's
+ * URL executor otherwise. External steam:// URLs cannot do this: the client's
+ * handlers pick the overlay whenever a game is running, and raise the main
+ * window over a focused game.
  *
  * The poll is armed by deliverToast for ARM_WINDOW_MS after each delivery and
  * stops itself afterwards, so an idle session polls nothing.
