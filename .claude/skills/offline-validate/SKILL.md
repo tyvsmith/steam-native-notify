@@ -7,10 +7,10 @@ All commands run from the repo root. Run all four; each catches a class the
 others miss.
 
 ```sh
-npm run typecheck    # tsc --noEmit
-npm run build        # proto gen + typecheck + bundle
-npm test             # tools/test-backend && node tools/test-routes
-npm run gen:table    # regenerate docs/notification-types.md; fails on drift
+bun run typecheck    # tsc --noEmit
+bun run build        # proto gen + typecheck + starlight pack (installs the .star)
+bun run test         # tools/test-backend && bun tools/test-routes
+bun run gen:table    # regenerate docs/notification-types.md; fails on drift
 ```
 
 ## What each proves, and what it does not
@@ -21,16 +21,15 @@ npm run gen:table    # regenerate docs/notification-types.md; fails on drift
   BigInt in a debug log). `tsc` catches the TS name errors; nothing catches a
   Lua nil global except `tools/test-backend`.
 - **`tools/test-backend`** (needs `lua5.4`) exercises backend/main.lua with
-  Millennium stubbed, plus notify-action's exposed seams (`--click-plan`,
+  Millennium stubbed (config, assets, fs; the runtime cache directory is a
+  throwaway under mktemp), plus notify-action's exposed seams (`--click-plan`,
   `--escape-markup`, `--resolve-icon`). Output ends `PASS` or `N FAILED`.
-  `skip TakeDevCommand (plugin not installed ...)` is fine on a machine
-  without the symlink install.
 - **`tools/test-routes`** is 71 exact-URL checks plus decode fixtures against
   the compiled frontend routing subgraph. Every expectation is a full literal
   URL on purpose: **when a route changes, change the literal in
   tools/test-routes to the new verified URL — never loosen a check** into a
   pattern or prefix match.
-- **`npm run gen:table`** derives the routed/not-routed classification by
+- **`bun run gen:table`** derives the routed/not-routed classification by
   running the real rules in frontend/routes.ts and fails when the CATALOG
   prose in tools/gen-types-table.mjs disagrees
   (`catalog disagrees with routes.ts for <Type> ...`). Run it after ANY

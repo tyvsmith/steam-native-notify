@@ -10,14 +10,14 @@ reshuffle). All commands run from the repo root.
 ## 1. Proto drift
 
 ```sh
-npm run proto:check
+bun run proto:check
 ```
 
 Exit 0 "proto is current" — move on. On drift it names new/removed types and
 messages; then:
 
 ```sh
-npm run proto:update && npm run gen && npm run gen:table
+bun run proto:update && bun run gen && bun run gen:table
 ```
 
 `gen:table` errors `no catalog entry for <Type> -- Steam added a type;
@@ -61,7 +61,7 @@ bundle.
 
 The fix starts in `docs/steam-routing.md` against the NEW bundle, not in the
 code: beautify `~/.local/share/Steam/steamui/chunk~*.js`
-(`npx js-beautify -f <chunk> -o chunk.pretty.js`), re-find the shapes using
+(`bunx js-beautify -f <chunk> -o chunk.pretty.js`), re-find the shapes using
 the quoted strings in that doc as search keys (minified identifiers are
 worthless across builds), update the doc's provenance header (build number,
 chunk name, sha256 prefix), and only then adjust the code to match.

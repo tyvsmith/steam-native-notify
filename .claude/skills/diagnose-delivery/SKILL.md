@@ -27,16 +27,21 @@ a BigInt did exactly that). Keep `dlog` wrapped and use `safeJson`.
 ## 2. Did the backend spawn the helper?
 
 ```sh
-grep -a steam-native-notify ~/.steam/steam/logs/console-linux.txt | tail -30
+tail -30 ~/.cache/steam-native-notify/plugin.log
 ```
 
-- `helper MISSING at ...` (at load) — the plugin is not installed at
-  `~/.local/share/millennium/plugins/steam-native-notify`; symlink the checkout
-  there.
+(The mirrored plugin log; Millennium buffers a packed plugin's logger output
+away from Steam's console log. Truncated at each backend load.)
+
+- `helper install FAILED: ...` (at load) — the packed asset could not be
+  written to `~/.cache/steam-native-notify/notify-action`; the reason is in
+  the line. The backend re-materializes the helper from the .star at every
+  load, so a stale or deleted copy heals on restart.
 - `undecodable payload:` / `undecodable settings:` — the frontend sent
   malformed JSON; the payload is in the line.
 - Nothing wrong logged and step 1 showed delivery — the backend ran
-  notify-action; go to step 3.
+  notify-action (via `sh ~/.cache/steam-native-notify/notify-action`); go to
+  step 3.
 
 ## 3. Exercise notify-action's seams directly
 

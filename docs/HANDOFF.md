@@ -31,10 +31,14 @@ Markup escaping lives in `tools/notify-action`, next to the `notify-send` that
 renders it, not in the backend. The backend never learns a setting's name; it
 stores the settings document opaquely.
 
-`tools/capture` greps the Millennium log for the prefixes `hook installed`,
-`url templates:`, `identity:`, `from-toast `, `toast <name> -> ` and
-`dev-fire`. Renaming a log prefix without updating tools/capture blinds the
-triage tool.
+`tools/capture` greps for the prefixes `hook installed`, `url templates:`,
+`identity:`, `from-toast `, `toast <name> -> ` and `dev-fire`. Renaming a log
+prefix without updating tools/capture blinds the triage tool. The lines live
+in `~/.cache/steam-native-notify/plugin.log`, truncated at each backend load:
+Millennium keeps a packed (.star) plugin's logger output in an in-memory
+buffer and never writes it to Steam's console-linux.txt, so backend/main.lua
+mirrors every line there itself. Steam's log still carries Millennium's
+loader lines (capture's freshness stamp).
 
 ## Working on this: read before touching anything
 
@@ -60,8 +64,8 @@ reports this first, because a stale bundle looks exactly like a broken feature.
 **A green build proves very little.** Five runtime failures in this project's
 history were undefined names or nil globals that the bundler emitted happily:
 two `PLUGIN_DIR` bugs, `toBase64`, `notificationFromToast`, and a
-`JSON.stringify` on a BigInt inside a debug log. `npm run build` type-checks
-now; `npm test` runs `tools/test-backend` (the Lua backend and the
+`JSON.stringify` on a BigInt inside a debug log. `bun run build` type-checks
+now; `bun run test` runs `tools/test-backend` (the Lua backend and the
 notify-action seams, with Millennium stubbed) and `tools/test-routes` (offline
 checks that lock the exact route URL for every routed type, plus decode
 fixtures and url/identity validation). Run all of it, then confirm behaviour
@@ -76,7 +80,7 @@ order is not preserved onto Lua parameter names, and two keys arrived swapped.
 A callable's return value comes back JSON-encoded, so a Lua string arrives
 wrapped in literal quote characters.
 
-**`npm run gen:table` is a check, not just a generator.** The table's route
+**`bun run gen:table` is a check, not just a generator.** The table's route
 column is derived by running the real routing rules; generation fails when the
 prose and the code disagree. The catalog once drifted three types from
 routes.ts and published a wrong count.
@@ -94,7 +98,7 @@ navigation is indistinguishable from nothing happening. That produced a fourth
 wrong conclusion.
 
 **Firing test notifications.** `tools/fire TestDownloadComplete 1073390`
-writes a command file into the INSTALLED plugin directory; the backend hands it
+writes a command file into `~/.cache/steam-native-notify`; the backend hands it
 over exactly once, and the frontend poll executes it within ~3s, calling the
 named test method on Steam's own NotificationStore. Those `Test*` methods push
 a real synthesized notification through the full toast pipeline. This covers
@@ -289,7 +293,12 @@ asserts it. Unclicked notifications never touch the `steam` binary at all.
    after ~8s despite `-t 0` and the action dies with it (the notification
    centre copy is inert). Orthogonal to routing, but it bounds how a click can
    ever be tested or used here.
-6. **Ecosystem: Millennium's official template moved to the starlight compiler
-   and `millennium.toml`** (Bun-based). This repo deliberately stays on
-   `plugin.json` and `@steambrew/ttc` until that migration is done as its own
-   project.
+6. ~~Ecosystem: migrate to the starlight compiler and `millennium.toml`.~~
+   Done (2026-08-28). The plugin is a packed `.star`
+   (`me.tysmith.steam-native-notify`), built and installed by
+   `bun run build`; `@steambrew/client` imports became the `millennium`
+   module; `tools/notify-action` rides inside the .star as an asset and the
+   backend materializes it to `~/.cache/steam-native-notify` at load, next to
+   the `.dev-fire` handoff and the mirrored `plugin.log`. The whole pipeline
+   was re-verified live through `tools/fire` (Achievement and a server Gift
+   injection) after the switch.

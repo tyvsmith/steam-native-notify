@@ -21,15 +21,19 @@ inside Steam's UI.
 
 ## Install
 
+Requires [Millennium](https://steambrew.app) >= v3.5 (the `.star` plugin
+format) and [Bun](https://bun.com).
+
 ```sh
-npm install
-npm run build
-ln -s "$PWD" ~/.local/share/millennium/plugins/steam-native-notify
+bun install
+bun run build
 ```
 
-Restart Steam, then enable **Steam Native Notify** under Millennium > Plugins.
-After rebuilding, restart Steam fully: `plugin.restart` and disable/enable do
-not reload the frontend.
+The build packs the plugin into
+`~/.local/share/millennium/plugins/me.tysmith.steam-native-notify.star`, so
+building is installing. Restart Steam, then enable **Steam Native Notify**
+under Millennium > Plugins. After rebuilding, restart Steam fully:
+`plugin.restart` and disable/enable do not reload the frontend.
 
 Runtime dependencies: `notify-send`, `curl`, `steam`, `sh`.
 
@@ -45,12 +49,13 @@ Two toggles in the plugin's settings panel, both off by default:
 ## Diagnosing
 
 ```sh
-tools/capture   # is the running bundle current, did the hook attach,
+tools/capture   # is the running .star current, did the hook attach,
                 # what did the last notifications carry
 ```
 
-The plugin logs to `~/.steam/steam/logs/console-linux.txt`; filter by
-`steam-native-notify`.
+The plugin logs to `~/.cache/steam-native-notify/plugin.log` (truncated at
+each backend load); Millennium's loader lines are in
+`~/.steam/steam/logs/console-linux.txt` under `me.tysmith.steam-native-notify`.
 
 ## Compatibility and known gaps
 

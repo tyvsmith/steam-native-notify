@@ -21,25 +21,31 @@ capture.
 ## Commands
 
 ```sh
-npm run build          # generate proto types, type-check, bundle
-npm run typecheck      # tsc --noEmit on its own
-npm test               # tools/test-backend (Lua, Millennium stubbed)
+bun run build          # generate proto types, type-check, pack + install the .star
+bun run typecheck      # tsc --noEmit on its own
+bun run test           # tools/test-backend (Lua, Millennium stubbed)
                        # + tools/test-routes (offline route/decode checks)
-tools/capture          # is the running bundle current, did the hook attach,
+tools/capture          # is the running .star current, did the hook attach,
                        # what did the last notifications carry
 tools/fire TestFriendOnline   # push a real test toast through Steam's pipeline
                               # (needs the tools/fire toggle in plugin settings)
 tools/fire --server 3 '{...}' # inject a server rollup through OnServerNotification
 tools/mep --methods    # talk to Millennium's external protocol (dev only)
 tools/notify-action --resolve-icon <url>
-npm run proto:check    # has Steam's protobuf drifted from vendor/
-npm run gen:table      # regenerate docs/notification-types.md; FAILS when the
+bun run proto:check    # has Steam's protobuf drifted from vendor/
+bun run gen:table      # regenerate docs/notification-types.md; FAILS when the
                        # catalog prose disagrees with what routes.ts does
 ```
 
-Install: `ln -s "$PWD" ~/.local/share/millennium/plugins/steam-native-notify`,
-then enable under Millennium > Plugins. Plugin log:
-`~/.steam/steam/logs/console-linux.txt`, filtered by `steam-native-notify`.
+Install: `bun install`, then `bun run build`; starlight packs the plugin into
+`~/.local/share/millennium/plugins/me.tysmith.steam-native-notify.star`
+(building IS installing). Enable under Millennium > Plugins.
+
+Plugin log: `~/.cache/steam-native-notify/plugin.log`, truncated at each
+backend load (Millennium buffers a packed plugin's logger output away from
+Steam's console log, so the backend mirrors it there). Millennium's own
+loader lines are still in `~/.steam/steam/logs/console-linux.txt`, filtered
+by `me.tysmith.steam-native-notify`.
 
 ## Hard constraints
 
@@ -54,13 +60,13 @@ steam -shutdown && sleep 15 && setsid uwsm-app -- gtk-launch steam.desktop
 `steam -shutdown` returns early, and a relaunch while the old instance lives is
 silently swallowed. If Steam is not up after the sleep, launch again.
 
-**Confirm the running bundle before diagnosing anything.** `tools/capture` says
-so first. A stale bundle is indistinguishable from a broken feature.
+**Confirm the running .star before diagnosing anything.** `tools/capture` says
+so first. A stale build is indistinguishable from a broken feature.
 
 **A green build proves very little.** Five runtime failures here were undefined
 names or nil globals the bundler emitted happily. The build type-checks;
-`npm test` covers the Lua side and the routing subgraph. Run both, then confirm
-behaviour in the running client.
+`bun run test` covers the Lua side and the routing subgraph. Run both, then
+confirm behaviour in the running client.
 
 **Diagnostics must never throw.** A debug log calling `JSON.stringify` on a
 BigInt silently killed every notification. Use `safeJson`; keep `dlog` wrapped.
@@ -116,6 +122,7 @@ regexes silently dropped edits and deleted a live declaration twice.
 ## Layout
 
 ```
+millennium.toml           plugin manifest; starlight packs everything below
 frontend/index.tsx        popup lifecycle: hook, wait, deliver   (Steam's CEF)
 frontend/notification.ts  React tree -> typed notification
 frontend/routes.ts        the routing catalog, cites steam-routing.md
@@ -126,6 +133,7 @@ frontend/devfire.ts       tools/fire door, gated by a setting
 frontend/Settings.tsx     settings panel; settings.ts, one JSON document
 frontend/generated/       generated from vendor/*.proto, do not edit
 backend/main.lua          pure marshaller                (Millennium Lua host)
-tools/notify-action       escaping, delivery, click action        (POSIX sh)
+tools/notify-action       escaping, delivery, click action        (POSIX sh,
+                          packed as a .star asset, materialized to ~/.cache)
 vendor/                   Steam's published .proto plus provenance
 ```

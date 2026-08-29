@@ -3,13 +3,20 @@ name: live-verify
 description: End-to-end runtime verification against the live Steam client — build, restart Steam, confirm the running bundle with tools/capture, fire test notifications with tools/fire, interpret the log. Use for "verify on the live client", "fire a test notification", "test this route in Steam", "did the change land", or after ANY frontend change.
 ---
 
-All commands run from the repo root. Plugin log: `~/.steam/steam/logs/console-linux.txt`.
+All commands run from the repo root. Plugin log:
+`~/.cache/steam-native-notify/plugin.log` (mirrored by the backend, truncated
+at each backend load); Millennium's loader lines are in
+`~/.steam/steam/logs/console-linux.txt` under `me.tysmith.steam-native-notify`.
 
 ## 1. Build, then full-restart Steam
 
 ```sh
-npm run build
+bun run build
 ```
+
+The build packs and installs
+`~/.local/share/millennium/plugins/me.tysmith.steam-native-notify.star`
+(starlight `output_path = "auto"`); there is no separate install step.
 
 **A full Steam restart is required for any frontend change.** `plugin.restart`
 and disable/enable reload only the Lua backend; the old frontend stays loaded
@@ -52,10 +59,14 @@ Preset it externally (needs Steam running for the socket; `tools/mep` needs
 python3-msgpack):
 
 ```sh
-tools/mep plugin.config.get name=steam-native-notify key=settings   # read current first
-tools/mep plugin.config.set name=steam-native-notify key=settings \
+tools/mep plugin.config.get name=me.tysmith.steam-native-notify key=settings   # read current first
+tools/mep plugin.config.set name=me.tysmith.steam-native-notify key=settings \
   value='"{\"hideSteamToast\":false,\"devFire\":true}"'
 ```
+
+With Steam stopped, the same document can be seeded directly in
+`~/.config/millennium/config.json` under
+`plugins."me.tysmith.steam-native-notify".config.settings` (a JSON string).
 
 - The value must arrive as a JSON-encoded **string** (the whole settings
   document). mep parses values as JSON, so a bare `{...}` arrives as a map and
