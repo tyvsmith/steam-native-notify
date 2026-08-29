@@ -78,8 +78,11 @@ function ensureMainWindow(): boolean {
 
 /** Run a desktop door once the main window is up (freshly created needs to settle). */
 function afterMainWindow(fn: () => void): void {
-	const existed = ensureMainWindow();
-	window.setTimeout(fn, existed ? 300 : 1500);
+	if (ensureMainWindow()) {
+		fn();
+		return;
+	}
+	window.setTimeout(fn, 1500);
 }
 
 /**
@@ -121,9 +124,8 @@ function desktopClick(route: string): void {
 		desktopAction(route);
 		return;
 	}
-	// Navigate after the raise (or creation) has landed: the focus shift is
-	// what makes the client's own handlers (chat especially) pick the desktop
-	// surface.
+	// Navigate once the window exists; a freshly created one needs its settle
+	// before the URL executor can land a page change in it.
 	afterMainWindow(() => {
 		try {
 			const sc: any = Reflect.get(globalThis, 'SteamClient');

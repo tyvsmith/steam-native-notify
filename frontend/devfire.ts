@@ -1,7 +1,7 @@
 import { callable, findModuleExport } from 'millennium';
 import { dlog, safeJson } from './log';
 import { parseCallableJson, settings } from './settings';
-import { findOverlayStore, openDialogInOverlay, openInOverlay, openMediaInOverlay } from './overlay';
+import { openDialogInOverlay, openInOverlay, openMediaInOverlay } from './overlay';
 
 /**
  * The tools/fire door: dev machinery, fenced off from the capture path.
@@ -86,27 +86,16 @@ function injectServerNotification(type: number, body: unknown): void {
 /**
  * Overlay research probes, from the in-game click investigation (2026-08-29).
  * The production door lives in overlay.ts; these keep the raw calls testable:
- * `info` dumps the overlay browser map, `openexternal` exercises the
- * steam://openexternalforpid parser, `activate` fires the synthetic request
- * -- the probe that proved the mechanism, now what the click bridge uses.
+ * `info` dumps the overlay browser map, `activate` fires the synthetic
+ * request -- the probe that proved the mechanism, now what the click bridge
+ * uses.
  */
-async function runOverlayProbe(probe: { call?: string; pid?: number; appid?: number; url?: string }): Promise<void> {
+async function runOverlayProbe(probe: { call?: string; appid?: number; url?: string }): Promise<void> {
 	switch (probe.call) {
 		case 'info': {
 			const sc: any = Reflect.get(globalThis, 'SteamClient');
 			const info = await sc?.Overlay?.GetOverlayBrowserInfo?.();
 			dlog(`overlay-info: ${safeJson(info)}`.slice(0, 1500));
-			return;
-		}
-		case 'openexternal': {
-			const store = findOverlayStore();
-			if (!store) {
-				dlog('overlay probe: store not found');
-				return;
-			}
-			const url = `steam://openexternalforpid/${probe.pid ?? 0}/${probe.url ?? ''}`;
-			const handled = store.OnSteamURLOpenExternalForPID(url);
-			dlog(`overlay-openexternal: pid=${probe.pid} handled=${handled}`);
 			return;
 		}
 		case 'activate': {
@@ -141,7 +130,7 @@ export function startDevFirePoll(): void {
 				call?: string;
 				args?: unknown[];
 				server?: { type: number; body?: unknown };
-				overlay?: { call?: string; pid?: number; appid?: number; url?: string };
+				overlay?: { call?: string; appid?: number; url?: string };
 			} | null>(raw, null);
 			if (!cmd) return;
 			if (cmd.overlay) {

@@ -53,19 +53,10 @@ fi
 
 # Overlay research probes (in-game click investigation; see devfire.ts):
 #   tools/fire --overlay-info                     dump overlay browser PIDs
-#   tools/fire --overlay-open <pid> <url>         OnSteamURLOpenExternalForPID
 #   tools/fire --overlay-activate <appid> <url>   synthetic ActivateGameOverlayToWebPage
 if [[ $1 == --overlay-info ]]; then
   printf '{"overlay":{"call":"info"}}\n' >"$RUNTIME_DIR/.dev-fire"
   echo "queued: overlay info  (result lands in the plugin log)"
-  exit 0
-fi
-
-if [[ $1 == --overlay-open ]]; then
-  pid="${2:?--overlay-open needs a pid}"
-  url="${3:?--overlay-open needs a url}"
-  printf '{"overlay":{"call":"openexternal","pid":%s,"url":"%s"}}\n' "$pid" "$url" >"$RUNTIME_DIR/.dev-fire"
-  echo "queued: overlay openexternal pid=$pid"
   exit 0
 fi
 
