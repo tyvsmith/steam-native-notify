@@ -2,6 +2,7 @@ import { callable } from 'millennium';
 import { dlog } from './log';
 import {
 	openChatInOverlay,
+	openChatOnDesktop,
 	openDialogInOverlay,
 	openInOverlay,
 	openMediaInOverlay,
@@ -42,11 +43,7 @@ let timer: number | null = null;
  * URL executor. Action tokens have no desktop behavior by analysis, so they
  * end here.
  */
-function desktopClick(route: string): void {
-	if (route.startsWith('action:')) {
-		dlog(`click-bridge: ${route} is in-game only; desktop click is inert`);
-		return;
-	}
+function raiseMainWindow(): void {
 	try {
 		const mgr: any = Reflect.get(globalThis, 'g_PopupManager');
 		const popups: Iterable<any> = mgr?.m_mapPopups?.values?.() ?? [];
@@ -60,6 +57,14 @@ function desktopClick(route: string): void {
 	} catch (e) {
 		dlog(`click-bridge: raise failed: ${(e as Error)?.message ?? e}`);
 	}
+}
+
+function desktopClick(route: string): void {
+	if (route.startsWith('action:')) {
+		dlog(`click-bridge: ${route} is in-game only; desktop click is inert`);
+		return;
+	}
+	raiseMainWindow();
 	// Navigate after the raise has landed: the focus shift is what makes the
 	// client's own handlers (chat especially) pick the desktop surface.
 	window.setTimeout(() => {
@@ -93,22 +98,39 @@ export function armClickBridge(): void {
 			if (typeof route !== 'string' || !route) return;
 			dlog(`click-bridge: ${route}`);
 			const appid = await runningOverlayAppId();
+			const focused = appid !== null && overlayFocusedAppId() === appid;
+
+			// Chat picks its surface explicitly on BOTH sides: the external
+			// friends/message URL lets the client choose, and it chooses the
+			// overlay whenever a game is running, focused or not. The same
+			// ingestion case with appid 0 resolves the desktop instance.
+			if (route.startsWith('steam://friends/message/')) {
+				const sid = route.slice('steam://friends/message/'.length);
+				if (focused) {
+					if (!openChatInOverlay(appid!, sid)) dlog('click-bridge: overlay door failed');
+				} else if (appid !== null) {
+					// Game running but unfocused: the desktop instance,
+					// explicitly (the URL handler would pick the overlay).
+					raiseMainWindow();
+					if (!openChatOnDesktop(sid)) dlog('click-bridge: overlay door failed');
+				} else {
+					// No game at all: the URL handler is the proven desktop
+					// path.
+					desktopClick(route);
+				}
+				return;
+			}
+
 			// Steam placed this toast in the overlay context, but its placement
 			// can lag focus changes; re-check at click time. If the game is not
 			// actually focused now (or quit), the click behaves like a desktop
 			// one -- what Steam's own desktop-context toast click does.
-			if (appid === null || overlayFocusedAppId() !== appid) {
+			if (!focused) {
 				desktopClick(route);
 				return;
 			}
 			let opened: boolean;
-			if (route.startsWith('steam://friends/message/')) {
-				// The chat dialog, in the overlay explicitly: the ingestion's
-				// "chat" case (ActivateGameOverlayToUser). The external URL
-				// form lets the client pick the surface, and it picks the
-				// overlay whenever a game runs -- even unfocused.
-				opened = openChatInOverlay(appid, route.slice('steam://friends/message/'.length));
-			} else if (route.startsWith(OPENURL_PREFIX)) {
+			if (route.startsWith(OPENURL_PREFIX)) {
 				opened = openInOverlay(appid, route.slice(OPENURL_PREFIX.length));
 			} else if (route.startsWith('steam://settings/')) {
 				// The ingestion's "settings" dialog IS Settings("System").

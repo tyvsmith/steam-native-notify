@@ -105,6 +105,16 @@ export function openChatInOverlay(appid: number, steamid64: string): boolean {
 	return sendOverlayRequest(appid, false, 'chat', steamid64);
 }
 
+/**
+ * Open a 1:1 chat on the DESKTOP explicitly: the same ingestion case with
+ * appid 0, whose GetInstanceForAppID resolves the desktop instance. Used when
+ * a game is running but unfocused -- the external friends/message URL would
+ * open the overlay chat invisibly.
+ */
+export function openChatOnDesktop(steamid64: string): boolean {
+	return sendOverlayRequest(0, false, 'chat', steamid64);
+}
+
 /** Open a web page in the running game's overlay browser. */
 export function openInOverlay(appid: number, url: string): boolean {
 	return sendOverlayRequest(appid, true, url);

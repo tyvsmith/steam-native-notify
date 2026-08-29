@@ -245,7 +245,7 @@ local function click_plan(route, ctx, action)
 	handle:close()
 	return plan
 end
-check("click plan: chat route skips activation", click_plan("steam://friends/message/76561198000000000") == "route")
+check("click plan: chat route always rides the bridge", click_plan("steam://friends/message/76561198000000000") == "overlay")
 check("click plan: nav route activates first", click_plan("steam://nav/games/details/570") == "activate+route")
 check("click plan: openurl route activates first", click_plan("steam://openurl/https://steamcommunity.com/x") == "activate+route")
 check("click plan: settings route activates first", click_plan("steam://settings/system") == "activate+route")
