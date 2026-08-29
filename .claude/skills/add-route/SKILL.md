@@ -22,6 +22,13 @@ are the stable search keys (minified names reshuffle every Steam build).
 
 - Client types (eSource=1) go in `clientRoute`; server types (eSource=2) in
   `serverRoute`. Return `null` when Steam's own click does nothing.
+- A type whose click opens a dialog no URL reaches (chat rooms, media items,
+  the playtime dialog) gets an **action token** in `clientOverlayAction`
+  instead: the click bridge maps tokens to the surface doors
+  (`frontend/clickbridge.ts` → `frontend/overlay.ts`). A new token needs a
+  door mirroring an observed Steam call — cite it in
+  docs/steam-routing.md ("The overlay and the surface doors") — and a case in
+  the bridge on BOTH the overlay and desktop paths.
 - Null discipline: missing identity, missing URL template, or a malformed
   field must drop the route to `null`, never emit a broken URL. The tests
   assert this.
@@ -43,6 +50,11 @@ Update the type's `CATALOG` entry (the `steam:` and `route:` prose) if the
 behaviour description changed. If a new server rule reads body fields, add a
 synthesized body to `SYNTH_BODY` (client fields: `SYNTH_FIELD`) — otherwise the
 generator derives `null` for the row and fails.
+
+The generator classifies by URL route only: a row whose `clientRoute` derives
+`null` must keep prose starting with the literal word `none`, even when the
+click bridge acts on its token — write it as "none as a URL — the click
+bridge ..." (the five existing token rows are the pattern).
 
 ## 4. Regenerate and test
 

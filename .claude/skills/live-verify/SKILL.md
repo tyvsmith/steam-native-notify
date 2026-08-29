@@ -64,7 +64,7 @@ python3-msgpack):
 ```sh
 tools/mep plugin.config.get name=me.tysmith.steam-native-notify key=settings   # read current first
 tools/mep plugin.config.set name=me.tysmith.steam-native-notify key=settings \
-  value='"{\"hideSteamToast\":false,\"devFire\":true}"'
+  value='"{\"hideSteamToast\":false,\"nativeToastInGame\":false,\"devFire\":true}"'
 ```
 
 With Steam stopped, the same document can be seeded directly in
@@ -76,7 +76,11 @@ With Steam stopped, the same document can be seeded directly in
   `LoadSettings` silently falls back to defaults.
 - MEP config writes never reach a running frontend (verified dead end): the
   preset takes effect at the next frontend load, i.e. the next Steam restart.
-- The write replaces the whole document — carry `hideSteamToast` too.
+- The write replaces the whole document — carry `hideSteamToast` and
+  `nativeToastInGame` too.
+- `nativeToastInGame` ON suppresses desktop delivery for overlay-context
+  toasts: an in-game fire then logs `toast ... (suppressed: native in-game)`
+  and nothing reaches the daemon. Not a break.
 
 ## 4. Fire
 
@@ -113,6 +117,18 @@ The only real-event self-service trigger is download completion:
 steam steam://uninstall/1073390 && steam steam://install/1073390   # Aircar, 0.89GB
 ```
 
+Overlay door probes (raw calls behind the click bridge; results land in the
+plugin log). The probe list is `info` / `activate` / `dialog` / `media` —
+the old `--overlay-open` (openexternal) probe is gone with the dead end it
+tested:
+
+```sh
+tools/fire --overlay-info                        # dump the overlay browser map
+tools/fire --overlay-activate <appid> <url>      # web page via the ingestion
+tools/fire --overlay-dialog <appid> settings     # named dialog (settings, requestplaytime, ...)
+tools/fire --overlay-media <appid>               # Recordings & Screenshots view
+```
+
 ## 5. Read the verdict (`tools/capture`, section 3)
 
 | log signature | meaning |
@@ -122,7 +138,14 @@ steam steam://uninstall/1073390 && steam steam://install/1073390   # Aircar, 0.8
 | `dev-fire: NotificationStore.X is not a function` | wrong test method name |
 | `dev-fire: server notification store not found` | bundle reshuffle — see `steam-update-smoke` |
 | `from-toast ... type=N (Name) source=... fields=...` | extraction worked; check the fields |
-| `toast ... -> {"title":...,"route":...}` | what was delivered, including the computed route |
+| `toast ... -> {"title":...,"route":...,"ingame":...}` | what was delivered: the URL route and the action token |
+| `toast ... -> {...} (suppressed: native in-game)` | `nativeToastInGame` kept it off the desktop; not a break |
+| `click-bridge: <payload>` | a click was consumed from the click file |
+| `overlay: ... appid=N` | a surface door opened (chat room, screenshot, clip, media, playtime, web page) |
+
+Click-path signatures beyond these (stale drops, door failures, the stashed
+toast context): the vocabulary table in `docs/HANDOFF.md`, "The click
+architecture".
 
 Known gates that swallow fires silently:
 
@@ -142,7 +165,13 @@ Known gates that swallow fires silently:
   unfocused is meaningless (three wrong conclusions came from this).
 - **Watch the client while clicking**: `steam://nav/...` changes a page inside
   the existing window; unwatched, a working navigation looks like nothing.
+- **Every click rides the click bridge**: notify-action writes the click to
+  `~/.cache/steam-native-notify/.click` and the bridge opens it from inside
+  Steam, picking the surface by live game focus. A consumed click always logs
+  `click-bridge:`; the bridge polls for 120s after each delivery and drops
+  clicks older than 30s.
 - **The desktop notification's click window is bounded**: quickshell expires
   the popup after ~8s despite `-t 0`, the action dies with it, and the
   notification-centre copy is inert. Click within ~8s.
-- A click that does nothing is CORRECT when the route is null — mirror Steam.
+- A click that does nothing is CORRECT when both route and action token are
+  null — mirror Steam.
