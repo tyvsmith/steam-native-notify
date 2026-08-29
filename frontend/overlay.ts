@@ -168,10 +168,16 @@ function findChatDispatcher(): any {
 export function openChatRoomDialog(appid: number, groupId: string, chatId: string): boolean {
 	const friends = findChatDispatcher();
 	if (!friends) return false;
+	const ctx = appid > 0 ? overlayToastCtx : desktopToastCtx;
+	if (!ctx) {
+		// The dispatcher dereferences the context's m_unPID unconditionally;
+		// calling without one throws inside Steam's code.
+		dlog(`overlay: chat room appid=${appid} has no stashed toast context`);
+		return false;
+	}
 	try {
-		const ctx = appid > 0 ? overlayToastCtx : desktopToastCtx;
-		dlog(`overlay: chat room appid=${appid} ctx=${ctx ? 'toast' : 'none'} group=${groupId} chat=${chatId}`);
-		friends.ShowChatRoomGroupDialog(ctx ?? undefined, groupId, chatId);
+		dlog(`overlay: chat room appid=${appid} group=${groupId} chat=${chatId}`);
+		friends.ShowChatRoomGroupDialog(ctx, groupId, chatId);
 		return true;
 	} catch (e) {
 		dlog(`overlay: chat room failed: ${(e as Error)?.message ?? e}`);

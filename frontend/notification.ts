@@ -22,6 +22,15 @@ export type DecodedNotification =
 /** eSource on Steam's notification object: which of the two systems produced it. */
 const SOURCE_SERVER = 2;
 
+/** Set as a side effect of the walk; consumed once by the caller. */
+let foundBrowserInfo: unknown = null;
+
+export function takeToastBrowserInfo(): unknown {
+	const v = foundBrowserInfo;
+	foundBrowserInfo = null;
+	return v;
+}
+
 /**
  * The notification Steam attached to the toast, read out of the React tree.
  *
@@ -48,10 +57,24 @@ export function notificationFromToast(win: Window): DecodedNotification | null {
 		}
 		if (!node || !key) return null;
 
+		// The walk continues past the notification-bearing fiber: the
+		// per-surface browserInfo (which the chat dialogs key on) lives on a
+		// context provider ABOVE the toast component -- as the provider's
+		// `value` (the popup object with params.browserInfo) or as plain props
+		// higher up. Returning early would miss it.
+		let decoded: DecodedNotification | null = null;
 		let fiber: any = (node as any)[key];
-		for (let depth = 0; fiber && depth < 12; depth++) {
-			const notification = (fiber.memoizedProps ?? fiber.pendingProps)?.notification;
-			if (notification && typeof notification === 'object') {
+		for (let depth = 0; fiber && depth < 30; depth++) {
+			const props = fiber.memoizedProps ?? fiber.pendingProps;
+			const bi =
+				props?.browserInfo ??
+				props?.params?.browserInfo ??
+				props?.value?.params?.browserInfo ??
+				props?.value?.browserInfo;
+			if (bi && typeof bi === 'object') foundBrowserInfo = bi;
+
+			const notification = props?.notification;
+			if (!decoded && notification && typeof notification === 'object') {
 				const type = Number((notification as any).eType);
 				const source = Number((notification as any).eSource);
 				const data = (notification as any).data;
@@ -64,7 +87,7 @@ export function notificationFromToast(win: Window): DecodedNotification | null {
 					} catch {
 						/* an unparseable body routes as null, and the raw dump in the log shows why */
 					}
-					return {
+					decoded = {
 						source: 'server',
 						type,
 						server: {
@@ -73,25 +96,26 @@ export function notificationFromToast(win: Window): DecodedNotification | null {
 							url: typeof data?.url === 'string' ? data.url : undefined,
 						},
 					};
-				}
-
-				const fields: Record<string, PbValue> = {};
-				const schema = fieldsForType(type);
-				const array = data?.array;
-				const offset = typeof data?.arrayIndexOffset_ === 'number' ? data.arrayIndexOffset_ : -1;
-				if (schema && Array.isArray(array)) {
-					for (const [num, field] of Object.entries(schema)) {
-						const value = array[Number(num) + offset];
-						// A repeated field arrives as an array, which PbValue cannot
-						// represent; no current route reads one, and this cast would
-						// hide it if one ever did. Extend PbValue before routing one.
-						if (value !== undefined && value !== null) fields[field.name] = value as PbValue;
+				} else {
+					const fields: Record<string, PbValue> = {};
+					const schema = fieldsForType(type);
+					const array = data?.array;
+					const offset = typeof data?.arrayIndexOffset_ === 'number' ? data.arrayIndexOffset_ : -1;
+					if (schema && Array.isArray(array)) {
+						for (const [num, field] of Object.entries(schema)) {
+							const value = array[Number(num) + offset];
+							// A repeated field arrives as an array, which PbValue cannot
+							// represent; no current route reads one, and this cast would
+							// hide it if one ever did. Extend PbValue before routing one.
+							if (value !== undefined && value !== null) fields[field.name] = value as PbValue;
+						}
 					}
+					decoded = { source: 'client', type, fields };
 				}
-				return { source: 'client', type, fields };
 			}
 			fiber = fiber.return;
 		}
+		return decoded;
 	} catch {
 		/* a toast that cannot be read still gets delivered, just without a route */
 	}

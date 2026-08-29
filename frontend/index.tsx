@@ -1,7 +1,7 @@
 import { callable, definePlugin, IconsModule } from 'millennium';
 import { typeName } from './generated/notifications';
 import { clientOverlayAction, clientRoute, serverRoute } from './routes';
-import { notificationFromToast, type DecodedNotification } from './notification';
+import { notificationFromToast, takeToastBrowserInfo, type DecodedNotification } from './notification';
 import { setIdentity } from './identity';
 import { loadUrlTemplates } from './urlstore';
 import { dlog, safeJson } from './log';
@@ -156,6 +156,9 @@ function deliverToast(win: Window, name: string, text: string): void {
 	const { title, body } = split(text);
 	const image = toastImage(win);
 	const fromToast = notificationFromToast(win);
+	// The walk also surfaces the toast's per-surface browserInfo, which the
+	// chat dialogs key on; stash it for the click bridge (overlay.ts).
+	rememberToastContext(name.startsWith('notificationtoasts_uid'), takeToastBrowserInfo());
 
 	let route: string | null = null;
 	let ingame: string | null = null;
@@ -204,14 +207,6 @@ function deliverToast(win: Window, name: string, text: string): void {
 function onPopupCreated(popup: SteamPopup): void {
 	const name = toastName(popup);
 	if (!name || !popup.window) return;
-	// The toast popup's browserInfo is the per-surface context descriptor the
-	// chat dialogs key on (overlay.ts, rememberToastContext); stash it so a
-	// later click can open dialogs on the surface Steam would have used.
-	const p: any = popup;
-	rememberToastContext(
-		name.startsWith('notificationtoasts_uid'),
-		p.params?.browserInfo ?? p.m_rgParams?.browserInfo ?? p.browserInfo,
-	);
 	readWhenPainted(popup.window, name, 0);
 }
 
