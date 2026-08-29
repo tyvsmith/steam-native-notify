@@ -424,6 +424,12 @@ came from.
 
 ## Still open
 
+The unified click architecture (every click through the bridge, the stale
+guard, and the nativeToastInGame toggle) passed a user-run live round on
+2026-08-29 after the post-migration review fixes: desktop with no game,
+tray-only, game unfocused, in-game, the stale-click drop, and the toggle's
+suppression were all exercised and behaved as documented.
+
 1. **The server-type sweep has gaps.** AsyncGame (12), TradeReversal (29),
    ModeratorMsg (14), FamilyInvite (16) and General (10) have never been
    injected; the CloudSyncConflict/Failure test fires have never been run
