@@ -163,7 +163,7 @@ function deliverToast(win: Window, name: string, text: string): void {
 		if (fromToast) {
 			kind = typeName(fromToast.type);
 			route = routeFor(fromToast);
-			if (fromToast.source === 'client') ingame = clientOverlayAction(fromToast.type);
+			if (fromToast.source === 'client') ingame = clientOverlayAction(fromToast.type, fromToast.fields);
 			const detail =
 				fromToast.source === 'server'
 					? `server type=${fromToast.server.type} url=${fromToast.server.url ?? ''} body=${safeJson(fromToast.server.body)}`

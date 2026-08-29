@@ -206,5 +206,12 @@ check('notification found up the fiber.return chain',
 
 is('a window with no fiber yields null', notification.notificationFromToast(toastWindow(null)), null);
 
+// In-game action tokens: types whose desktop route is null but whose in-game
+// click acts (observed; consumed by the click bridge).
+is('screenshot with a handle names the item', routes.clientOverlayAction(14, { screenshot_handle: 'h123' }), 'screenshot:h123');
+is('screenshot without a handle falls back to the grid', routes.clientOverlayAction(14, {}), 'media');
+is('playtime warning names the dialog', routes.clientOverlayAction(45, {}), 'requestplaytime');
+is('routed types carry no action token', routes.clientOverlayAction(1, { appid: 570 }), null);
+
 console.log(failures === 0 ? '\nPASS' : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

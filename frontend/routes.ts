@@ -77,10 +77,15 @@ function pendingInvitesUrl(): string | null {
  * opens the Recordings & Screenshots view; PlaytimeWarning pops the playtime
  * request dialog (the overlay ingestion's "requestplaytime" case).
  */
-export function clientOverlayAction(type: number): string | null {
+export function clientOverlayAction(type: number, fields: Record<string, PbValue>): string | null {
 	switch (type) {
-		case 14: // Screenshot -> overlay media grid
-			return 'media';
+		case 14: {
+			// Screenshot: Steam's own in-game click opens the SPECIFIC
+			// screenshot (nav.Media.Screenshot({state:{id}})); the proto's
+			// screenshot_handle is that id. Without one, the media grid.
+			const handle = fields.screenshot_handle;
+			return typeof handle === 'string' && handle ? `screenshot:${handle}` : 'media';
+		}
 		case 45: // PlaytimeWarning -> overlay playtime request dialog
 			return 'requestplaytime';
 		default:

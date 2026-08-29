@@ -93,6 +93,29 @@ export function openDialogInOverlay(appid: number, dialog: string): boolean {
  * navigates its overlay context to the media grid, and the same navigator is
  * reachable here through the store's GetNavigator.
  */
+/**
+ * Open one specific screenshot in the overlay's media view, the way Steam's
+ * own in-game screenshot toast click does: nav.Media.Screenshot({state:{id}})
+ * with the notification's screenshot_handle as the id.
+ */
+export function openScreenshotInOverlay(appid: number, id: string): boolean {
+	const store = findOverlayStore();
+	if (!store) return false;
+	try {
+		const nav = store.GetNavigator({ unRequestingAppID: appid });
+		if (typeof nav?.Media?.Screenshot !== 'function') {
+			dlog('overlay: navigator has no Media.Screenshot');
+			return false;
+		}
+		dlog(`overlay: screenshot appid=${appid} id=${id}`);
+		nav.Media.Screenshot({ state: { id } });
+		return true;
+	} catch (e) {
+		dlog(`overlay: screenshot failed: ${(e as Error)?.message ?? e}`);
+		return false;
+	}
+}
+
 export function openMediaInOverlay(appid: number): boolean {
 	const store = findOverlayStore();
 	if (!store) return false;
