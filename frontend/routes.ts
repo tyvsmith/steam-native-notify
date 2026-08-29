@@ -88,6 +88,12 @@ export function clientOverlayAction(type: number, fields: Record<string, PbValue
 		}
 		case 45: // PlaytimeWarning -> overlay playtime request dialog
 			return 'requestplaytime';
+		case 56: // GameRecordingStop: Steam's own click is
+		case 58: {
+			// nav.Media.Clip({state:{id: data.clip_id()}}) -- the specific clip.
+			const clip = fields.clip_id;
+			return typeof clip === 'string' && clip ? `clip:${clip}` : 'media';
+		}
 		default:
 			return null;
 	}

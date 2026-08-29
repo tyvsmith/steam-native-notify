@@ -160,6 +160,28 @@ export function openScreenshotInOverlay(appid: number, id: string): boolean {
 	}
 }
 
+/**
+ * Open one specific clip, the way Steam's own recording toast click does:
+ * nav.Media.Clip({state:{id}}) with the notification's clip_id.
+ */
+export function openClipInOverlay(appid: number, id: string): boolean {
+	const store = findOverlayStore();
+	if (!store) return false;
+	try {
+		const nav = store.GetNavigator({ unRequestingAppID: appid });
+		if (typeof nav?.Media?.Clip !== 'function') {
+			dlog('overlay: navigator has no Media.Clip');
+			return false;
+		}
+		dlog(`overlay: clip appid=${appid} id=${id}`);
+		nav.Media.Clip({ state: { id } });
+		return true;
+	} catch (e) {
+		dlog(`overlay: clip failed: ${(e as Error)?.message ?? e}`);
+		return false;
+	}
+}
+
 export function openMediaInOverlay(appid: number): boolean {
 	const store = findOverlayStore();
 	if (!store) return false;

@@ -256,7 +256,7 @@ check("click plan: in-game controller settings goes to the overlay bridge", clic
 check("click plan: in-game nav route is inert", click_plan("steam://nav/games/details/570", "overlay") == "none")
 check("click plan: in-game chat route rides the bridge", click_plan("steam://friends/message/76561198000000000", "overlay") == "overlay")
 check("click plan: in-game action token goes to the action bridge", click_plan("", "overlay", "media") == "overlay-action")
-check("click plan: desktop action token stays inert", click_plan("", "no", "media") == "none")
+check("click plan: desktop action token rides the bridge too", click_plan("", "", "media") == "overlay-action")
 
 -- notify-action's markup escaping: the daemon parses the body as markup, so
 -- what the helper hands notify-send must have &, <, > entity-escaped.

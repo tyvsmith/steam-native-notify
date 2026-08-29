@@ -149,10 +149,11 @@ in_overlay() {
 }
 
 click_plan() {
-	# An in-game action token (Screenshot -> media, PlaytimeWarning ->
-	# requestplaytime) only means anything in the overlay context; on the
-	# desktop these types mirror Steam by doing nothing.
-	if [ -n "${2:-}" ] && in_overlay "${3:-}"; then
+	# Action tokens (Screenshot, clips, PlaytimeWarning) always ride the
+	# bridge, which picks the surface by live focus: the overlay doors when
+	# the game is focused, the same doors retargeted at the desktop instance
+	# otherwise -- Steam's own desktop clicks for these types act too.
+	if [ -n "${2:-}" ]; then
 		echo overlay-action
 		return
 	fi

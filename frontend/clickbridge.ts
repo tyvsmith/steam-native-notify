@@ -3,6 +3,7 @@ import { dlog } from './log';
 import {
 	openChatInOverlay,
 	openChatOnDesktop,
+	openClipInOverlay,
 	openDialogInOverlay,
 	openInOverlay,
 	openMediaInOverlay,
@@ -59,9 +60,33 @@ function raiseMainWindow(): void {
 	}
 }
 
+/**
+ * Action tokens on the desktop: the same doors, retargeted at the desktop
+ * instance (appid 0 -- GetInstanceForAppID(0), proven by the desktop chat
+ * fix). Steam's own desktop clicks for these types open the media page and
+ * the playtime dialog in the main window, so inert was the wrong mirror.
+ */
+function desktopAction(route: string): void {
+	raiseMainWindow();
+	let opened: boolean;
+	if (route.startsWith('action:screenshot:')) {
+		opened = openScreenshotInOverlay(0, route.slice('action:screenshot:'.length));
+	} else if (route.startsWith('action:clip:')) {
+		opened = openClipInOverlay(0, route.slice('action:clip:'.length));
+	} else if (route === 'action:media') {
+		opened = openMediaInOverlay(0);
+	} else if (route === 'action:requestplaytime') {
+		opened = openDialogInOverlay(0, 'requestplaytime');
+	} else {
+		dlog(`click-bridge: unbridgeable action ${route}`);
+		return;
+	}
+	if (!opened) dlog('click-bridge: desktop door failed');
+}
+
 function desktopClick(route: string): void {
 	if (route.startsWith('action:')) {
-		dlog(`click-bridge: ${route} is in-game only; desktop click is inert`);
+		desktopAction(route);
 		return;
 	}
 	raiseMainWindow();
@@ -142,6 +167,9 @@ export function armClickBridge(): void {
 				// Screenshot with its handle: the specific item, where Steam's
 				// own in-game click goes.
 				opened = openScreenshotInOverlay(appid, route.slice('action:screenshot:'.length));
+			} else if (route.startsWith('action:clip:')) {
+				// A finished recording: the specific clip.
+				opened = openClipInOverlay(appid, route.slice('action:clip:'.length));
 			} else if (route === 'action:media') {
 				// Screenshot without a handle: the Recordings & Screenshots view.
 				opened = openMediaInOverlay(appid);
