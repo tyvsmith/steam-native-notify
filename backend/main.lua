@@ -5,19 +5,34 @@
 local logger = require("logger")
 local millennium = require("millennium")
 local json = require("json")
+local fs = require("fs")
 
 local APP_NAME = "Steam"
 
--- Resolved through the plugins directory rather than the source checkout, so the
--- helper is found whether this is installed as a copy or a symlink.
-local PLUGIN_DIR = (os.getenv("HOME") or "")
-    .. "/.local/share/millennium/plugins/steam-native-notify"
+-- The packed .star is never unpacked on disk, so there is no plugin directory
+-- at runtime. Everything file-shaped lives in a cache directory instead: the
+-- notify-action helper is carried inside the .star as an asset and written out
+-- here at load, and tools/fire drops its command file here too. XDG_CACHE_HOME
+-- to match the helper's own icon cache next door.
+local RUNTIME_DIR = (os.getenv("XDG_CACHE_HOME") or ((os.getenv("HOME") or "") .. "/.cache"))
+    .. "/steam-native-notify"
+local HELPER = RUNTIME_DIR .. "/notify-action"
+local HELPER_ASSET = "tools/notify-action"
+local LOG_FILE = RUNTIME_DIR .. "/plugin.log"
 
-local function file_exists(path)
-    local handle = io.open(path, "r")
-    if not handle then return false end
-    handle:close()
-    return true
+--- Millennium keeps a packed plugin's logger output in an in-memory buffer
+--- (readable in its UI log viewer) and never writes it to Steam's
+--- console-linux.txt, which would blind tools/capture. Every line is mirrored
+--- into a session log file next to the helper; on_load truncates it, so the
+--- file always describes the current Steam session.
+local function log_line(level, line)
+    local tagged = "[steam-native-notify] " .. line
+    if level == "error" then logger:error(tagged) else logger:info(tagged) end
+    local handle = io.open(LOG_FILE, "a")
+    if handle then
+        handle:write(os.date("[%Y-%m-%d %H:%M:%S] ") .. tagged .. "\n")
+        handle:close()
+    end
 end
 
 --- POSIX single-quote escaping: end the quote, add an escaped quote, reopen.
@@ -25,6 +40,22 @@ end
 local function shell_quote(value)
     local escaped = tostring(value):gsub("'", "'\\''")
     return "'" .. escaped .. "'"
+end
+
+--- Write the bundled helper into RUNTIME_DIR. Runs on every load, so the
+--- on-disk copy always matches the packed plugin. Spawned through `sh`
+--- (io.open cannot set an executable bit, and does not need to).
+local function install_helper()
+    local content = millennium.assets.read(HELPER_ASSET)
+    if type(content) ~= "string" or content == "" then
+        return nil, "asset " .. HELPER_ASSET .. " missing from the plugin bundle"
+    end
+    fs.create_directories(RUNTIME_DIR)
+    local handle, err = io.open(HELPER, "w")
+    if not handle then return nil, tostring(err) end
+    handle:write(content)
+    handle:close()
+    return HELPER
 end
 
 --- Takes ONE argument, a JSON string. Millennium does not pass an argument
@@ -35,10 +66,13 @@ end
 --- Called from the frontend via callable('Notify').
 --- Backgrounded: a notification daemon that is slow, restarting, or absent must
 --- never block the Steam UI thread that called into us.
+---@ffi
+---@param payload any
+---@return string
 function Notify(payload)
     local ok, data = pcall(json.decode, tostring(payload or "{}"))
     if not ok or type(data) ~= "table" then
-        logger:error("[steam-native-notify] undecodable payload: " .. tostring(payload))
+        log_line("error", "undecodable payload: " .. tostring(payload))
         return "error"
     end
 
@@ -54,7 +88,8 @@ function Notify(payload)
     -- and tools/test-backend. A missing helper was already reported loudly at
     -- load; delivering without it would mean a second, untested notify-send.
     local command = table.concat({
-        shell_quote(PLUGIN_DIR .. "/tools/notify-action"),
+        "sh",
+        shell_quote(HELPER),
         shell_quote(title), shell_quote(body), shell_quote(raw_image), shell_quote(route),
         ">/dev/null 2>&1 &",
     }, " ")
@@ -70,17 +105,22 @@ end
 --- builds stored hideSteamToast under its own key; read once as a fallback.
 local SETTINGS_KEY = "settings"
 
+---@ffi
+---@return string
 function LoadSettings()
     local stored = millennium.config.get(SETTINGS_KEY)
     if type(stored) == "string" and stored ~= "" then return stored end
     return json.encode({ hideSteamToast = millennium.config.get("hideSteamToast") == true })
 end
 
+---@ffi
+---@param payload any
+---@return string
 function SaveSettings(payload)
     local text = tostring(payload or "")
     local ok, data = pcall(json.decode, text)
     if not ok or type(data) ~= "table" then
-        logger:error("[steam-native-notify] undecodable settings: " .. text)
+        log_line("error", "undecodable settings: " .. text)
         return "error"
     end
 
@@ -88,8 +128,11 @@ function SaveSettings(payload)
     return "ok"
 end
 
+---@ffi
+---@param line any
+---@return string
 function Log(line)
-    logger:info("[steam-native-notify] " .. tostring(line or ""))
+    log_line("info", tostring(line or ""))
     return "ok"
 end
 
@@ -125,16 +168,20 @@ local function most_recent_steamid()
     return nil
 end
 
+---@ffi
+---@return string
 function Identity()
     return json.encode({ steamid64 = most_recent_steamid() })
 end
 
---- Dev trigger: tools/fire writes PLUGIN_DIR/.dev-fire; the frontend polls this
---- callable and executes the named NotificationStore test method. Consume-once:
---- the file is deleted before its content is returned, so a command fires one
---- toast, not one per poll.
+--- Dev trigger: tools/fire writes RUNTIME_DIR/.dev-fire; the frontend polls
+--- this callable and executes the named NotificationStore test method.
+--- Consume-once: the file is deleted before its content is returned, so a
+--- command fires one toast, not one per poll.
+---@ffi
+---@return string
 function TakeDevCommand()
-    local path = PLUGIN_DIR .. "/.dev-fire"
+    local path = RUNTIME_DIR .. "/.dev-fire"
     local handle = io.open(path, "r")
     if not handle then return "" end
     local content = handle:read("*a") or ""
@@ -144,21 +191,27 @@ function TakeDevCommand()
 end
 
 local function on_load()
-    logger:info("[steam-native-notify] backend loaded")
+    -- Directory first, then truncate: the session log starts fresh so that
+    -- tools/capture never reads a previous session's lines as current.
+    fs.create_directories(RUNTIME_DIR)
+    local fresh = io.open(LOG_FILE, "w")
+    if fresh then fresh:close() end
 
-    local helper = PLUGIN_DIR .. "/tools/notify-action"
-    if file_exists(helper) then
-        logger:info("[steam-native-notify] helper: " .. helper)
+    log_line("info", "backend loaded")
+
+    local helper, err = install_helper()
+    if helper then
+        log_line("info", "helper: " .. helper)
     else
-        logger:error("[steam-native-notify] helper MISSING at " .. helper
-            .. " -- notifications will have no artwork or click action")
+        log_line("error", "helper install FAILED: " .. tostring(err)
+            .. " -- notifications will not be delivered")
     end
 
     millennium.ready()
 end
 
 local function on_unload()
-    logger:info("[steam-native-notify] backend unloaded")
+    log_line("info", "backend unloaded")
 end
 
 local function on_frontend_loaded() end

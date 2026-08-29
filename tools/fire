@@ -26,16 +26,18 @@
 
 set -euo pipefail
 
-# The backend reads .dev-fire from the INSTALLED plugin directory, so that is
-# where it must be written. Under the symlink install this is the checkout;
-# under a copy install, writing to the checkout would queue into a void while
-# still printing "queued".
-PLUGIN_DIR="$HOME/.local/share/millennium/plugins/steam-native-notify"
-if [[ ! -d $PLUGIN_DIR ]]; then
-  echo "not installed: $PLUGIN_DIR does not exist" >&2
-  echo "install first: ln -s <checkout> $PLUGIN_DIR" >&2
+# The backend reads .dev-fire from the plugin's cache directory (the packed
+# .star has no plugin directory at runtime); backend/main.lua computes the
+# same path. Writing without the plugin installed would queue into a void
+# while still printing "queued", hence the .star check.
+RUNTIME_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/steam-native-notify"
+STAR="$HOME/.local/share/millennium/plugins/me.tysmith.steam-native-notify.star"
+if [[ ! -f $STAR ]]; then
+  echo "not installed: $STAR does not exist" >&2
+  echo "build first: bun run build (output_path=auto installs it)" >&2
   exit 1
 fi
+mkdir -p "$RUNTIME_DIR"
 
 if [[ $# -lt 1 ]]; then
   sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -44,7 +46,7 @@ fi
 
 if [[ $1 == --wishlist ]]; then
   appid="${2:-1073390}"
-  printf '{"server":{"type":8,"body":{"appid":%s,"count":1}}}\n' "$appid" >"$PLUGIN_DIR/.dev-fire"
+  printf '{"server":{"type":8,"body":{"appid":%s,"count":1}}}\n' "$appid" >"$RUNTIME_DIR/.dev-fire"
   echo "queued: server Wishlist appid=$appid  (needs the tools/fire toggle on in the plugin settings; picked up within ~3s)"
   exit 0
 fi
@@ -52,7 +54,7 @@ fi
 if [[ $1 == --server ]]; then
   type="${2:?--server needs a numeric ESteamNotificationType}"
   body="${3:-{\}}"
-  printf '{"server":{"type":%s,"body":%s}}\n' "$type" "$body" >"$PLUGIN_DIR/.dev-fire"
+  printf '{"server":{"type":%s,"body":%s}}\n' "$type" "$body" >"$RUNTIME_DIR/.dev-fire"
   echo "queued: server type=$type body=$body  (needs the tools/fire toggle on in the plugin settings; picked up within ~3s)"
   exit 0
 fi
@@ -68,5 +70,5 @@ for a in "$@"; do
 done
 args+="]"
 
-printf '{"call":"%s","args":%s}\n' "$call" "$args" >"$PLUGIN_DIR/.dev-fire"
+printf '{"call":"%s","args":%s}\n' "$call" "$args" >"$RUNTIME_DIR/.dev-fire"
 echo "queued: $call $args  (needs the tools/fire toggle on in the plugin settings; picked up within ~3s)"

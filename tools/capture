@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
 # Report what the plugin is doing, in the order the answers are needed:
-# is the running bundle current, did the notification feed attach, and what did
+# is the running .star current, did the notification hook attach, and what did
 # the last notification carry.
 #
 # Usage: tools/capture [n]      n = how many notification lines to show (default 8)
+#
+# Two log sources. Steam's console-linux.txt carries Millennium's loader lines
+# (the "Delegating frontend load" stamp that dates the running frontend).
+# The plugin's own diagnostics do NOT go there: Millennium buffers a packed
+# (.star) plugin's logger output in memory, so backend/main.lua mirrors every
+# line into PLUGIN_LOG, truncated at each backend load.
 
 set -uo pipefail
 
 LOG="$HOME/.steam/steam/logs/console-linux.txt"
-BUNDLE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.millennium/Dist/index.js"
+PLUGIN_LOG="${XDG_CACHE_HOME:-$HOME/.cache}/steam-native-notify/plugin.log"
+BUNDLE="$HOME/.local/share/millennium/plugins/me.tysmith.steam-native-notify.star"
 LINES="${1:-8}"
 
-# The log is not valid UTF-8 throughout and is full of ANSI colour.
-plugin_lines() { grep -a "steam-native-notify" "$LOG" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'; }
+# The Steam log is not valid UTF-8 throughout and is full of ANSI colour.
+steam_log_lines() { grep -a "me.tysmith.steam-native-notify" "$LOG" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'; }
+plugin_lines() { cat "$PLUGIN_LOG" 2>/dev/null; }
 
 hr() { printf '%s\n' "----------------------------------------------------------------"; }
 
@@ -21,16 +29,16 @@ if [[ ! -f $LOG ]]; then
   exit 1
 fi
 
-echo "== 1. is the running bundle the one on disk? =="
+echo "== 1. is the running plugin the .star on disk? =="
 if [[ -f $BUNDLE ]]; then
   built=$(stat -c %Y "$BUNDLE")
   printf '   built   %s\n' "$(date -d "@$built" '+%Y-%m-%d %H:%M:%S')"
 else
-  echo "   built   (no bundle — run: npm run build)"
+  echo "   built   (no .star — run: bun run build)"
   built=0
 fi
 
-loaded_line=$(plugin_lines | grep -a "Delegating frontend load" | tail -1)
+loaded_line=$(steam_log_lines | grep -a "Delegating frontend load" | tail -1)
 if [[ -n $loaded_line ]]; then
   loaded_stamp=$(sed -n 's/^\[\([0-9-]* [0-9:]*\)\].*/\1/p' <<<"$loaded_line")
   printf '   loaded  %s\n' "$loaded_stamp"
@@ -49,8 +57,8 @@ fi
 hr
 echo "== 2. did the hook attach, and did startup data load? =="
 # These prefixes are the contract stated in frontend/log.ts; keep in sync.
-verdict=$(plugin_lines | grep -aE "hook installed|hook failed|g_PopupManager never appeared|url templates:|identity:" | tail -6)
-if [[ -n $verdict ]]; then printf '%s\n' "$verdict"; else echo "   (nothing yet)"; fi
+verdict=$(plugin_lines | grep -aE "hook installed|hook failed|g_PopupManager never appeared|url templates:|identity:|helper" | tail -6)
+if [[ -n $verdict ]]; then printf '%s\n' "$verdict"; else echo "   (nothing yet — no $PLUGIN_LOG; has the backend loaded?)"; fi
 
 hr
 echo "== 3. what did the last notifications carry? =="

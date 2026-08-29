@@ -11,6 +11,20 @@
 
 local root = arg[0]:match("(.*)/tools/[^/]+$") or "."
 
+-- The backend materializes its helper into ${XDG_CACHE_HOME}/steam-native-notify
+-- at load. Point that at a throwaway directory so the test never touches the
+-- real cache; os.getenv is intercepted before main.lua reads it at load time.
+local tmp_handle = io.popen("mktemp -d")
+local tmp_cache = tmp_handle:read("*l")
+tmp_handle:close()
+assert(tmp_cache and tmp_cache ~= "", "mktemp failed")
+
+local real_getenv = os.getenv
+os.getenv = function(name)
+	if name == "XDG_CACHE_HOME" then return tmp_cache end
+	return real_getenv(name)
+end
+
 local logged = {}
 package.preload["logger"] = function()
 	return {
@@ -19,7 +33,8 @@ package.preload["logger"] = function()
 	}
 end
 -- Stubbed before the module loads: main.lua captures `millennium` at load time,
--- so a stub installed afterwards would never be seen.
+-- so a stub installed afterwards would never be seen. assets.read serves the
+-- real helper from the repo, standing in for the copy packed into the .star.
 local stored = {}
 package.preload["millennium"] = function()
 	return {
@@ -28,6 +43,25 @@ package.preload["millennium"] = function()
 			get = function(k) return stored[k] end,
 			set = function(k, v) stored[k] = v end,
 		},
+		assets = {
+			read = function(path)
+				local handle = io.open(root .. "/" .. path, "r")
+				if not handle then return nil end
+				local content = handle:read("*a")
+				handle:close()
+				return content
+			end,
+		},
+	}
+end
+-- os.execute is captured below, so the stub binds the real one now and
+-- creates directories for real.
+local mkdir_execute = os.execute
+package.preload["fs"] = function()
+	return {
+		create_directories = function(path)
+			return mkdir_execute("mkdir -p '" .. path .. "'") ~= nil
+		end,
 	}
 end
 
@@ -91,7 +125,19 @@ for _, entry in ipairs(logged) do
 	if entry[2]:find("helper: ") then sawHelper = true end
 	if entry[1] == "error" then check("no errors at load", false, entry[2]) end
 end
-check("helper found at load", sawHelper)
+check("helper installed at load", sawHelper)
+
+-- The materialized helper must be byte-identical to the packed asset (here:
+-- the repo copy the assets.read stub serves).
+local function slurp(path)
+	local handle = io.open(path, "r")
+	if not handle then return nil end
+	local content = handle:read("*a")
+	handle:close()
+	return content
+end
+check("helper materialized verbatim",
+	slurp(tmp_cache .. "/steam-native-notify/notify-action") == slurp(root .. "/tools/notify-action"))
 
 -- A notification with no route: the download-complete shape.
 executed = {}
@@ -99,7 +145,8 @@ ok, err = pcall(Notify, '{"title":"Download Complete","body":"Aircar is ready","
 check("Notify with no route runs", ok, err)
 check("Notify spawned something", #executed == 1, tostring(#executed) .. " commands")
 if executed[1] then
-	check("spawns the helper", executed[1]:find("tools/notify%-action") ~= nil, executed[1])
+	check("spawns the helper through sh", executed[1]:sub(1, 3) == "sh ", executed[1])
+	check("spawns the materialized helper", executed[1]:find("steam%-native%-notify/notify%-action") ~= nil, executed[1])
 	check("passes the title", executed[1]:find("'Download Complete'", 1, true) ~= nil, executed[1])
 	check("passes the image", executed[1]:find("steamloopback", 1, true) ~= nil, executed[1])
 	check("backgrounded", executed[1]:sub(-1) == "&", executed[1])
@@ -160,22 +207,17 @@ if type(id_json) == "string" and id_json:find("steamid64") then
 	check("Identity id is a steamid64", id_json:find('"7656119%d%d%d%d%d%d%d%d%d%d"') ~= nil, id_json)
 end
 
--- TakeDevCommand: consume-once semantics against the real plugin directory
--- (the repo, when installed as a symlink). Skipped when not installed.
-local plugin_dir = (os.getenv("HOME") or "") .. "/.local/share/millennium/plugins/steam-native-notify"
-local fire = io.open(plugin_dir .. "/.dev-fire", "w")
-if fire then
-	fire:write('{"call":"TestFriendOnline","args":[]}')
-	fire:close()
-	local taken
-	ok, taken = pcall(TakeDevCommand)
-	check("TakeDevCommand runs", ok, taken)
-	check("TakeDevCommand returns the command", type(taken) == "string" and taken:find("TestFriendOnline") ~= nil, tostring(taken))
-	ok, taken = pcall(TakeDevCommand)
-	check("TakeDevCommand consumes once", ok and taken == "", tostring(taken))
-else
-	print("  skip TakeDevCommand (plugin not installed at " .. plugin_dir .. ")")
-end
+-- TakeDevCommand: consume-once semantics against the runtime cache directory
+-- (created by on_load above), the same place tools/fire writes.
+local fire = assert(io.open(tmp_cache .. "/steam-native-notify/.dev-fire", "w"))
+fire:write('{"call":"TestFriendOnline","args":[]}')
+fire:close()
+local taken
+ok, taken = pcall(TakeDevCommand)
+check("TakeDevCommand runs", ok, taken)
+check("TakeDevCommand returns the command", type(taken) == "string" and taken:find("TestFriendOnline") ~= nil, tostring(taken))
+ok, taken = pcall(TakeDevCommand)
+check("TakeDevCommand consumes once", ok and taken == "", tostring(taken))
 
 -- Garbage in must not throw.
 executed = {}
@@ -224,6 +266,8 @@ check("resolve-icon: garbage falls back",
 	resolved_icon("not a url at all") == "steam")
 
 os.execute = real_execute
+os.getenv = real_getenv
+if tmp_cache:find("^/tmp/") then os.execute("rm -rf '" .. tmp_cache .. "'") end
 
 print(failures == 0 and "\nPASS" or ("\n" .. failures .. " FAILED"))
 os.exit(failures == 0 and 0 or 1)
