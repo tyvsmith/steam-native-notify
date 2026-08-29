@@ -191,12 +191,16 @@ done
 # this notification, so neither does this. Dismissing is the whole behaviour.
 [ -n "$route" ] || [ -n "$ingame_action" ] || exit 0
 
+# The write is stamped (<epoch-seconds>|<payload>): the bridge only polls for
+# 120s after a delivery, so a click landing after it disarms would sit in the
+# file and fire as a surprise on the NEXT arm, up to days later. The bridge
+# drops anything older than 30 seconds.
 case $(click_plan "$route" "$ingame_action") in
 overlay)
 	if [ -n "$route" ]; then
-		printf '%s' "$route" >"$RUNTIME_DIR/.click"
+		printf '%s|%s' "$(date +%s)" "$route" >"$RUNTIME_DIR/.click"
 	else
-		printf 'action:%s' "$ingame_action" >"$RUNTIME_DIR/.click"
+		printf '%s|action:%s' "$(date +%s)" "$ingame_action" >"$RUNTIME_DIR/.click"
 	fi
 	;;
 esac

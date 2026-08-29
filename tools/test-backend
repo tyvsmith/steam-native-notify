@@ -219,12 +219,15 @@ check("TakeDevCommand returns the command", type(taken) == "string" and taken:fi
 ok, taken = pcall(TakeDevCommand)
 check("TakeDevCommand consumes once", ok and taken == "", tostring(taken))
 
--- TakeClick: the in-game click handoff, same consume-once contract.
+-- TakeClick: the click handoff, same consume-once contract. The file holds a
+-- stamped payload (<epoch-seconds>|<payload>); the stamp is the bridge's
+-- business, so TakeClick passes it through untouched.
 local click = assert(io.open(tmp_cache .. "/steam-native-notify/.click", "w"))
-click:write("steam://openurl/https://store.steampowered.com/gifts/")
+click:write("1756500000|steam://openurl/https://store.steampowered.com/gifts/")
 click:close()
 ok, taken = pcall(TakeClick)
-check("TakeClick returns the route", ok and taken == "steam://openurl/https://store.steampowered.com/gifts/", tostring(taken))
+check("TakeClick passes the stamped payload through verbatim",
+	ok and taken == "1756500000|steam://openurl/https://store.steampowered.com/gifts/", tostring(taken))
 ok, taken = pcall(TakeClick)
 check("TakeClick consumes once", ok and taken == "", tostring(taken))
 
@@ -339,6 +342,29 @@ check("caps: plain-text daemon gets the raw body",
 	delivered_body([[echo "(['actions', 'body'],)"]]) == "a < b & c")
 check("caps: unreachable daemon defaults to escaped",
 	delivered_body([[exit 1]]) == "a &lt; b &amp; c")
+
+-- A clicked route is written to the click file stamped with the write time
+-- (<epoch-seconds>|<payload>), so the bridge can drop a click that outlived
+-- its arm window. notify-send is shimmed to report the click.
+local click_h = io.popen("mktemp -d")
+local click_dir = click_h:read("*l")
+click_h:close()
+if click_dir and click_dir ~= "" then
+	local ns = assert(io.open(click_dir .. "/notify-send", "w"))
+	ns:write("#!/bin/sh\nprintf 'default'\nexit 0\n")
+	ns:close()
+	io.popen("chmod +x '" .. click_dir .. "/notify-send'"):close()
+	io.popen("mkdir -p '" .. click_dir .. "/steam-native-notify'"):close()
+	io.popen("XDG_CACHE_HOME='" .. click_dir .. "' PATH='" .. click_dir .. "':\"$PATH\" "
+		.. root .. "/tools/notify-action 'T' 'b' '' 'steam://openurl/x' ''; echo done"):read("*a")
+	local cf = io.open(click_dir .. "/steam-native-notify/.click", "r")
+	local written = cf and cf:read("*a") or "(no click file)"
+	if cf then cf:close() end
+	check("clicked route is written stamped", written:match("^%d+|steam://openurl/x$") ~= nil, tostring(written))
+	io.popen("rm -rf '" .. click_dir .. "'"):close()
+else
+	print("  skip stamped click (mktemp failed)")
+end
 
 os.execute = real_execute
 os.getenv = real_getenv
