@@ -5,6 +5,7 @@ import { notificationFromToast, type DecodedNotification } from './notification'
 import { setIdentity } from './identity';
 import { loadUrlTemplates } from './urlstore';
 import { dlog, safeJson } from './log';
+import { armClickBridge } from './clickbridge';
 import { startDevFirePoll } from './devfire';
 import { SettingsPanel } from './Settings';
 import { loadSettings, parseCallableJson, settings } from './settings';
@@ -173,6 +174,10 @@ function deliverToast(win: Window, name: string, text: string): void {
 	}
 	dlog(`toast ${name} -> ${safeJson({ title, body, image, kind, route })}`);
 	void notify({ payload: safeJson({ title, body, image, route }) });
+
+	// In-game, notify-action delivers the click back through a file instead of
+	// a steam:// URL; arm the bridge that picks it up (clickbridge.ts).
+	armClickBridge();
 
 	// Closing Steam's own popup is what stops a notification being reported
 	// twice. Done here rather than with a compositor rule because the plugin

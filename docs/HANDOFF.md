@@ -293,11 +293,21 @@ asserts it. Unclicked notifications never touch the `steam` binary at all.
    toast clicks ALL stay in the overlay, and the client routes even our chat
    click into the overlay by itself -- but the activation preamble
    (`steam` before the route) raised the desktop client OVER the game.
-   `click_plan` now skips activation while a game is running (detected at
-   click time via `pgrep -f 'SteamLaunch AppId='`; `NOTIFY_ACTION_GAME`
-   overrides for tests). What remains open: an in-game click on a non-chat
-   route after the fix -- expected to open the overlay browser like Steam's
-   own, but not yet observed.
+   Skipping activation was not enough: even a bare openurl navigates the
+   desktop client and raises it over the game. No external steam:// URL
+   reaches the overlay browser (the wiki's steam://overlay is gone from
+   current binaries; steam://openexternalforpid invoked externally never
+   reaches its JS handler). The working door, proven live via the dev-fire
+   overlay probes (the synthetic request opened the gifts page in the
+   Helldivers 2 overlay): the store owning OnGameOverlayActivateRequested,
+   reachable from the shared context, routes bWebPage requests into the
+   overlay navigator. The click bridge now uses it: in-game, notify-action
+   writes openurl routes to RUNTIME_DIR/.click (click_plan "overlay");
+   clickbridge.ts polls TakeClick for 120s after each delivery and opens the
+   URL via overlay.ts. Chat routes still go through `steam` (the client
+   overlays them itself); nav/settings routes are inert in-game (no overlay
+   equivalent). Still to observe: one real end-to-end click through the
+   bridge (desktop notification -> overlay page).
 5. **The popup is the whole click window.** quickshell 1.2 expires the popup
    after ~8s despite `-t 0` and the action dies with it (the notification
    centre copy is inert). Orthogonal to routing, but it bounds how a click can

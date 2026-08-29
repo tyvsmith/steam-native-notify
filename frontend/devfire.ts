@@ -1,6 +1,7 @@
 import { callable, findModuleExport } from 'millennium';
 import { dlog, safeJson } from './log';
 import { parseCallableJson, settings } from './settings';
+import { findOverlayStore, openInOverlay } from './overlay';
 
 /**
  * The tools/fire door: dev machinery, fenced off from the capture path.
@@ -83,38 +84,13 @@ function injectServerNotification(type: number, body: unknown): void {
 }
 
 /**
- * Overlay research probes, for the in-game click investigation (2026-08-29):
- * Steam's own in-game toast clicks stay in the overlay, and no external
- * steam:// URL reproduces that -- the client raises its main window instead.
- * The overlay is driven from THIS context: the store that registers
- * RegisterForActivateOverlayRequests owns both OnGameOverlayActivateRequested
- * (the ActivateGameOverlayToWebPage ingestion) and OnSteamURLOpenExternalForPID
- * (the steam://openexternalforpid parser). These probes exercise both, plus
- * GetOverlayBrowserInfo for the real overlay PIDs.
+ * Overlay research probes, from the in-game click investigation (2026-08-29).
+ * The production door lives in overlay.ts; these keep the raw calls testable:
+ * `info` dumps the overlay browser map, `openexternal` exercises the
+ * steam://openexternalforpid parser, `activate` fires the synthetic request
+ * -- the probe that proved the mechanism, now what the click bridge uses.
  */
-let overlayStore: any;
-
-function findOverlayStore(): any {
-	if (overlayStore) return overlayStore;
-	try {
-		overlayStore = findModuleExport((e: any) => {
-			try {
-				return (
-					typeof e?.OnGameOverlayActivateRequested === 'function' &&
-					typeof e?.OnSteamURLOpenExternalForPID === 'function'
-				);
-			} catch {
-				return false;
-			}
-		});
-	} catch (e) {
-		dlog(`overlay store lookup failed: ${(e as Error)?.message ?? e}`);
-	}
-	return overlayStore;
-}
-
 async function runOverlayProbe(probe: { call?: string; pid?: number; appid?: number; url?: string }): Promise<void> {
-	const store = findOverlayStore();
 	switch (probe.call) {
 		case 'info': {
 			const sc: any = Reflect.get(globalThis, 'SteamClient');
@@ -123,6 +99,7 @@ async function runOverlayProbe(probe: { call?: string; pid?: number; appid?: num
 			return;
 		}
 		case 'openexternal': {
+			const store = findOverlayStore();
 			if (!store) {
 				dlog('overlay probe: store not found');
 				return;
@@ -133,24 +110,9 @@ async function runOverlayProbe(probe: { call?: string; pid?: number; appid?: num
 			return;
 		}
 		case 'activate': {
-			if (!store) {
+			if (!openInOverlay(probe.appid ?? 0, probe.url ?? '')) {
 				dlog('overlay probe: store not found');
-				return;
 			}
-			// The request shape ActivateGameOverlayToWebPage produces, read out
-			// of the bundle's own openexternalforpid parser.
-			const request = {
-				unRequestingAppID: probe.appid ?? 0,
-				appid: probe.appid ?? 0,
-				bWebPage: true,
-				strDialog: probe.url ?? '',
-				eWebPageMode: 0 /* Default */,
-				steamidTarget: '0',
-				eFlag: 0 /* OverlayToStoreFlag_None */,
-				strConnectString: '',
-			};
-			dlog(`overlay-activate: ${safeJson(request)}`);
-			store.OnGameOverlayActivateRequested(request);
 			return;
 		}
 		default:

@@ -21,7 +21,8 @@
 set -u
 
 APP_NAME="Steam"
-CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/steam-native-notify/icons"
+RUNTIME_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/steam-native-notify"
+CACHE="$RUNTIME_DIR/icons"
 LIBRARY_CACHE="$HOME/.local/share/Steam/appcache/librarycache"
 
 # The Desktop Notifications spec reserves "default" for the action a plain body
@@ -127,11 +128,14 @@ resolve_icon() {
 # window at the same time could bury the dialog the click just opened.
 #
 # A running game is the other exception. Steam's own in-game toast clicks all
-# stay in the overlay, and the client routes a chat click there by itself
-# (observed 2026-08-29, Helldivers 2) -- but the activation preamble raised
-# the desktop client OVER the game, which Steam's own click never does. So
-# while a game is running, send the route alone and let the client put it
-# where it puts its own clicks. Detection is Steam's launch chain: every
+# stay in the overlay, and NO steam:// URL reproduces that: even a bare
+# openurl navigates the desktop client and raises it OVER the game (observed
+# 2026-08-29, Helldivers 2). The client routes a chat click into the overlay
+# by itself, so chat routes still go through `steam`; an openurl route is
+# written to a click file the plugin's click bridge picks up and opens in the
+# overlay browser through Steam's own activate-overlay ingestion; nav and
+# settings routes have no overlay equivalent, so their in-game clicks are
+# inert rather than disruptive. Detection is Steam's launch chain: every
 # title runs under `reaper SteamLaunch AppId=N`, checked at click time.
 game_running() {
 	case ${NOTIFY_ACTION_GAME:-auto} in
@@ -145,7 +149,8 @@ click_plan() {
 	case ${1:-} in
 	"") echo none ;;
 	steam://friends/message/*) echo route ;;
-	*) game_running && echo route || echo activate+route ;;
+	steam://openurl/*) game_running && echo overlay || echo activate+route ;;
+	*) game_running && echo none || echo activate+route ;;
 	esac
 }
 
@@ -208,6 +213,9 @@ activate+route)
 		steam
 		steam "$route"
 	} >/dev/null 2>&1 &
+	;;
+overlay)
+	printf '%s' "$route" >"$RUNTIME_DIR/.click"
 	;;
 esac
 exit 0

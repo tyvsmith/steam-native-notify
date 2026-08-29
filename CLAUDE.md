@@ -131,6 +131,8 @@ frontend/routes.ts        the routing catalog, cites steam-routing.md
 frontend/urlstore.ts      Steam's URL templates (GetSteamURLList)
 frontend/identity.ts      signed-in steamid64, from the backend
 frontend/log.ts           dlog/safeJson; prefixes are capture's contract
+frontend/overlay.ts       in-game overlay browser door (activate-overlay)
+frontend/clickbridge.ts   in-game clicks: .click file -> overlay.ts
 frontend/devfire.ts       tools/fire door, gated by a setting
 frontend/Settings.tsx     settings panel; settings.ts, one JSON document
 frontend/generated/       generated from vendor/*.proto, do not edit

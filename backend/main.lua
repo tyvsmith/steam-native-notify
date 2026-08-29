@@ -174,20 +174,33 @@ function Identity()
     return json.encode({ steamid64 = most_recent_steamid() })
 end
 
---- Dev trigger: tools/fire writes RUNTIME_DIR/.dev-fire; the frontend polls
---- this callable and executes the named NotificationStore test method.
---- Consume-once: the file is deleted before its content is returned, so a
---- command fires one toast, not one per poll.
----@ffi
----@return string
-function TakeDevCommand()
-    local path = RUNTIME_DIR .. "/.dev-fire"
+--- Consume-once file handoff: the file is deleted before its content is
+--- returned, so a command acts once, not once per poll.
+local function consume(path)
     local handle = io.open(path, "r")
     if not handle then return "" end
     local content = handle:read("*a") or ""
     handle:close()
     os.remove(path)
     return content
+end
+
+--- Dev trigger: tools/fire writes RUNTIME_DIR/.dev-fire; the frontend polls
+--- this callable and executes the named NotificationStore test method.
+---@ffi
+---@return string
+function TakeDevCommand()
+    return consume(RUNTIME_DIR .. "/.dev-fire")
+end
+
+--- In-game click handoff: with a game running, notify-action writes the
+--- clicked route to RUNTIME_DIR/.click instead of invoking a steam:// URL
+--- (which would raise the desktop client over the game); the frontend's
+--- click bridge polls this and opens the route in the overlay browser.
+---@ffi
+---@return string
+function TakeClick()
+    return consume(RUNTIME_DIR .. "/.click")
 end
 
 local function on_load()
