@@ -78,6 +78,34 @@ function fnSnippet(fn: unknown): { fnName: string; snippet: string } {
 }
 
 /**
+ * The toast popup is PORTAL-rendered from the main window's React tree
+ * (observed: climbing to the absolute root and walking down swept 673
+ * candidates -- window chrome, Millennium settings, the whole Steam UI). The
+ * toast's own subtree hangs under a HostPortal fiber (tag 4) whose
+ * containerInfo lives in the popup's document; that portal is the walk root.
+ * Fallback when no portal is found: the highest fiber whose stateNode is
+ * still in the popup document.
+ */
+function toastSubtreeRoot(fiber: any, doc: Document): any {
+	let cur = fiber;
+	let best = fiber;
+	for (let up = 0; cur && up < 80; up++) {
+		try {
+			if (cur.tag === 4 && cur.stateNode?.containerInfo?.ownerDocument === doc) return cur;
+			const sn = cur.stateNode;
+			if (sn && typeof sn === 'object' && sn.ownerDocument === doc) best = cur;
+			// A host fiber in ANOTHER document means the portal boundary was
+			// passed without matching; everything above is main-window tree.
+			if (sn && typeof sn === 'object' && sn.ownerDocument && sn.ownerDocument !== doc) break;
+		} catch {
+			/* hostile getters must not stop the climb */
+		}
+		cur = cur.return;
+	}
+	return best;
+}
+
+/**
  * Collect handler-bearing fibers breadth-first from the root, so the array
  * comes back shallowest-first and candidates[0] is the outermost handler.
  */
@@ -136,12 +164,7 @@ export function stashReplayCandidates(win: Window, name: string): void {
 			return;
 		}
 
-		// Climb to the root so the downward walk sees the whole toast tree, not
-		// just the subtree under whichever element happened to carry a fiber key.
-		let root = fiber;
-		for (let up = 0; root.return && up < 60; up++) root = root.return;
-
-		const { candidates, fns } = collectCandidates(root);
+		const { candidates, fns } = collectCandidates(toastSubtreeRoot(fiber, doc));
 		pruneStash();
 		const chosen = candidates.length > 0 ? candidates[0] : null;
 		stash.delete(name); // re-insert so the map stays insertion-ordered by recency
