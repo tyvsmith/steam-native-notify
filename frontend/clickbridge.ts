@@ -7,25 +7,27 @@ import {
 	openDialogInOverlay,
 	openInOverlay,
 	openMediaInOverlay,
+	openPlaytimeDialog,
 	openScreenshotInOverlay,
 	overlayFocusedAppId,
 	runningOverlayAppId,
 } from './overlay';
 
 /**
- * The in-game click bridge. With a game running, a desktop notification's
- * click cannot be delivered as a steam:// URL: openurl navigates the desktop
- * client and raises it OVER the game, which Steam's own in-game toast click
- * never does (its handler runs inside the overlay context). So in-game,
- * tools/notify-action writes the route to a click file instead, and this end
- * -- which lives inside Steam -- opens it in the overlay browser through
- * Steam's own activate-overlay ingestion (overlay.ts).
+ * The click bridge: clicks that must pick their surface from inside Steam.
+ *
+ * tools/notify-action writes the clicked route (or action token) to a click
+ * file when the surface decision needs live state -- overlay-context toasts,
+ * every chat click, every action token -- and this end consumes it, checks
+ * which game window is focused RIGHT NOW (overlay.ts tracks the client's own
+ * focus signal), and opens the destination on the right surface: the overlay
+ * doors for the focused game, the same doors retargeted at the desktop
+ * instance (appid 0) or the client's URL executor otherwise. External
+ * steam:// URLs cannot do this: the client's handlers pick the overlay
+ * whenever a game is running, and raise the main window over a focused game.
  *
  * The poll is armed by deliverToast for ARM_WINDOW_MS after each delivery and
- * stops itself afterwards, so an idle session polls nothing. Only
- * steam://openurl/ routes are bridged: chat routes never write a click file
- * (the client already routes them into the overlay), and nav/settings routes
- * have no overlay equivalent, so their in-game clicks are inert by design.
+ * stops itself afterwards, so an idle session polls nothing.
  */
 const takeClick = callable<[], string>('TakeClick');
 
@@ -76,7 +78,7 @@ function desktopAction(route: string): void {
 	} else if (route === 'action:media') {
 		opened = openMediaInOverlay(0);
 	} else if (route === 'action:requestplaytime') {
-		opened = openDialogInOverlay(0, 'requestplaytime');
+		opened = openPlaytimeDialog(0);
 	} else {
 		dlog(`click-bridge: unbridgeable action ${route}`);
 		return;

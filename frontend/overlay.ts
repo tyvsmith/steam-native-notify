@@ -132,6 +132,30 @@ export function openDialogInOverlay(appid: number, dialog: string): boolean {
 }
 
 /**
+ * The playtime request dialog, the way Steam's own toast click opens it:
+ * navigator.RequestPlaytimeDialog("manual"). Each surface's navigator does
+ * the right thing -- the desktop one (appid 0) shows the main-window dialog,
+ * the overlay one routes through the activate-overlay request list.
+ */
+export function openPlaytimeDialog(appid: number): boolean {
+	const store = findOverlayStore();
+	if (!store) return false;
+	try {
+		const nav = store.GetNavigator({ unRequestingAppID: appid });
+		if (typeof nav?.RequestPlaytimeDialog !== 'function') {
+			dlog('overlay: navigator has no RequestPlaytimeDialog');
+			return false;
+		}
+		dlog(`overlay: playtime dialog appid=${appid}`);
+		nav.RequestPlaytimeDialog('manual');
+		return true;
+	} catch (e) {
+		dlog(`overlay: playtime dialog failed: ${(e as Error)?.message ?? e}`);
+		return false;
+	}
+}
+
+/**
  * Open the overlay's Recordings & Screenshots view. The activate-overlay
  * ingestion has no media case; Steam's own in-game screenshot toast click
  * navigates its overlay context to the media grid, and the same navigator is
