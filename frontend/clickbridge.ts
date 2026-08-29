@@ -1,6 +1,5 @@
 import { callable } from 'millennium';
 import { dlog } from './log';
-import { parseCallableJson } from './settings';
 import { openInOverlay, runningOverlayAppId } from './overlay';
 
 /**
@@ -38,8 +37,15 @@ export function armClickBridge(): void {
 			return;
 		}
 		try {
-			const route = parseCallableJson<string>(await takeClick(), '');
+			// The click file holds a bare route string, so the callable's
+			// return needs exactly ONE unwrap -- parseCallableJson would parse
+			// twice (its payloads are JSON documents) and silently eat the
+			// route it just consumed. That bug shipped once; hence the log
+			// line on every consumed click.
+			const raw = await takeClick();
+			const route = typeof raw === 'string' && raw ? (JSON.parse(raw) as string) : '';
 			if (typeof route !== 'string' || !route) return;
+			dlog(`click-bridge: ${route}`);
 			if (!route.startsWith(OPENURL_PREFIX)) {
 				dlog(`click-bridge: unbridgeable route ${route}`);
 				return;
