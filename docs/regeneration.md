@@ -1,14 +1,14 @@
 # Removed machinery, and how to bring it back
 
-This branch (`feature/replay-click-path`) keeps only what executes: clicks
-replay Steam's own toast handler (frontend/replay.ts + choose.ts), and the
-capture path logs what it saw. Two whole subsystems were removed because
-nothing on this branch consumes them. Their code is PRESERVED, not lost:
+This implementation keeps only what executes: clicks replay Steam's own
+toast handler (frontend/replay.ts + choose.ts), and the capture path logs
+what it saw. Two whole subsystems were removed because nothing here consumes
+them. Their code is PRESERVED, not lost:
 
-- **`backup/routing-catalog`** — a branch pinned at main's tip (21f731f),
-  holding the complete original implementation. `main` itself also still
-  carries it until the replay branch is promoted. Nothing here needs to be
-  rewritten from prose; check the files out of the branch.
+- **`backup/routing-catalog`** — a branch pinned at 21f731f (main's tip
+  before the replay implementation was promoted), holding the complete
+  original implementation. Nothing here needs to be rewritten from prose;
+  check the files out of the branch.
 
 Read this before re-adding either subsystem; the "why removed" notes are
 the design constraints a regeneration must re-satisfy.

@@ -1,17 +1,16 @@
 # steam-native-notify
 
 A Millennium plugin that mirrors Steam's in-client notification toasts to the
-desktop notification daemon, keeping the artwork and the click action. Toasts
-land in your notification centre with everything else, and a click does what
-clicking Steam's own toast does: open the chat, the library page, the
-achievements page, the chat room or screenshot dialog. With a game focused the
-click opens in the game's overlay; on the desktop it surfaces the Steam window
-first, which Steam's own toasts never do, and reopens it from the tray.
+desktop notification daemon, keeping the artwork and the click. Toasts land
+in your notification centre with everything else, and clicking one does
+exactly what clicking Steam's own toast would — because it *is* Steam's own
+click: at capture time the plugin stashes the click handler Steam attached to
+the toast, and a click on the desktop notification re-runs it. There is no
+per-type routing table to maintain; notification types Steam adds tomorrow
+are clickable on day one.
 
-Routing mirrors Steam's own click logic, read out of the shipped UI bundle:
-31 of 62 notification types route as URLs, five more open Steam's own dialogs
-through the click bridge, and the rest are inert in Steam itself.
-`docs/notification-types.md` lists every type and what a click does.
+`docs/architecture.md` is the full picture; `docs/notification-types.md`
+lists every notification type and what Steam's click does for it.
 
 ## Why a plugin
 
@@ -40,15 +39,18 @@ Runtime dependencies: `notify-send`, `curl`, `steam`, `sh`.
 
 ## Settings
 
-Three toggles in the plugin's settings panel, all off by default:
+Two toggles, both on by default:
 
-- **Hide Steam's own notification toasts**: close Steam's toast once it has
-  been read, so only the desktop notification shows.
-- **Keep Steam's own toasts while in a game**: while a game is focused, leave
-  Steam's own in-game toast alone and send no desktop notification; out of
-  the game, desktop notifications as normal.
-- **Accept test commands from tools/fire**: the development door for firing
-  test notifications. Leave it off unless you are working on the plugin.
+- **Use native notifications when outside of games**: send Steam
+  notifications to the desktop daemon while no game has focus.
+- **Use native notifications when inside games**: also send them while a
+  game has focus, alongside Steam's in-game toast. Off keeps in-game
+  notifications inside Steam only.
+
+Developer toggles (hide Steam's own toasts; accept `tools/fire` test
+commands) exist but stay hidden unless `devMode` is set in the stored
+settings document — there is deliberately no UI for it (see
+`docs/architecture.md`, testing methodology).
 
 ## Diagnosing
 
@@ -60,6 +62,8 @@ tools/capture   # is the running .star current, did the hook attach,
 The plugin logs to `~/.cache/steam-native-notify/plugin.log` (truncated at
 each backend load); Millennium's loader lines are in
 `~/.steam/steam/logs/console-linux.txt` under `me.tysmith.steam-native-notify`.
+Every stage of a click logs one line, and every failure mode names itself —
+the vocabulary table is in `docs/architecture.md`.
 
 ## Compatibility and known gaps
 
@@ -72,8 +76,14 @@ each backend load); Millennium's loader lines are in
 - A notification is clickable only while its popup is up; the copy in the
   notification centre is inert. quickshell 1.2 expires the popup after about
   8 seconds despite the no-timeout hint, which bounds the click window.
-- Clicks are executed by the running Steam client, so a click landing after
-  Steam has fully quit does nothing.
+- The stashed click is frozen to the surface the toast rendered on: a
+  notification captured while a game was focused, clicked after that game
+  exits, does nothing. Clicks also expire 120 seconds after delivery and do
+  not survive a Steam restart or full quit.
+- A toast whose handler cannot be identified with proof stays unclickable by
+  design — never the wrong action. Notification types whose Steam click does
+  nothing are equally unclickable here: the plugin mirrors Steam, it does
+  not invent.
 - Some server-sent types (wishlist sales, comments, and others) never toast
   unless enabled under Steam Settings > Notifications. Steam suppresses them
   before this plugin sees anything.

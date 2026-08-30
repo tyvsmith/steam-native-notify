@@ -1,16 +1,15 @@
 ---
 name: offline-validate
-description: The no-Steam validation gate — typecheck, build, backend and route tests, docs-table regeneration. Run before claiming any change works, before committing, and after ANY edit to frontend/, backend/main.lua, tools/notify-action, or routes. Triggers - "run the tests", "does it build", "validate this change".
+description: The no-Steam validation gate — typecheck, build, backend and frontend tests. Run before claiming any change works, before committing, and after ANY edit to frontend/, backend/main.lua, or tools/notify-action. Triggers - "run the tests", "does it build", "validate this change".
 ---
 
-All commands run from the repo root. Run all four; each catches a class the
+All commands run from the repo root. Run all three; each catches a class the
 others miss.
 
 ```sh
 bun run typecheck    # tsc --noEmit
-bun run build        # proto gen + typecheck + starlight pack (installs the .star)
-bun run test         # tools/test-backend && bun tools/test-routes
-bun run gen:table    # regenerate docs/notification-types.md; fails on drift
+bun run build        # typecheck + starlight pack (installs the .star)
+bun run test         # tools/test-backend && bun tools/test-frontend
 ```
 
 ## What each proves, and what it does not
@@ -23,22 +22,18 @@ bun run gen:table    # regenerate docs/notification-types.md; fails on drift
 - **`tools/test-backend`** (needs `lua5.4`) exercises backend/main.lua with
   Millennium stubbed (config, assets, fs; the runtime cache directory is a
   throwaway under mktemp), plus notify-action's exposed seams (`--click-plan`,
-  `--escape-markup`, `--resolve-icon`). Output ends `PASS` or `N FAILED`.
-- **`tools/test-routes`** is 71 exact-URL checks plus decode fixtures against
-  the compiled frontend routing subgraph. Every expectation is a full literal
-  URL on purpose: **when a route changes, change the literal in
-  tools/test-routes to the new verified URL — never loosen a check** into a
-  pattern or prefix match.
-- **`bun run gen:table`** derives the routed/not-routed classification by
-  running the real rules in frontend/routes.ts and fails when the CATALOG
-  prose in tools/gen-types-table.mjs disagrees
-  (`catalog disagrees with routes.ts for <Type> ...`). Run it after ANY
-  routes.ts change and **commit the regenerated docs/notification-types.md**.
-  `no catalog entry for <Type>` means Steam added a type — see the
-  `steam-update-smoke` skill.
+  `--escape-markup`, `--resolve-icon`) with notify-send/gdbus shimmed.
+  Output ends `PASS` or `N FAILED`.
+- **`tools/test-frontend`** compiles the Millennium-free frontend subgraph and
+  locks the toast decode (notification.ts) and the click chooser (choose.ts):
+  the twin/sole/refuse rules that keep a replayed click from ever running the
+  wrong handler. **Never loosen a refusal fixture** — the refusals encode the
+  measured toast-slot leak (docs/experiments/click-replay.md, "Build-out
+  incidents").
 
 ## The gate is necessary, not sufficient
 
-Passing all four says nothing about behaviour in the running client (stale
-bundle, Steam gates, focus rules). Behaviour claims still require the
-`live-verify` skill.
+The replay walk and the invoke touch live React fibers and Steam stores that
+exist only in the running client. Passing everything above says nothing
+about behaviour there (stale bundle, Steam gates, focus rules). Behaviour
+claims still require the `live-verify` skill.

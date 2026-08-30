@@ -49,7 +49,6 @@ this step.
 | `STALE — Steam is running an older build` | restart Steam (step 1), re-run capture. Ignore capture's own "toggle the plugin off and on" hint — toggling reloads only the Lua backend, never the frontend |
 | `loaded (never)` | enable the plugin in Millennium > Plugins |
 | no `hook installed` in section 2 | bridge inactive — see the `steam-update-smoke` skill |
-| `url templates:` / `identity:` missing | openurl/profile routes will emit null; check those lines' errors |
 | section 3 empty | nothing captured yet — fire something (step 4) |
 
 ## 3. The tools/fire toggle
@@ -97,8 +96,10 @@ tools/fire TestSystemUpdate 1                # 1 = update available, 2 = restart
 tools/fire TestFriendMessage null '"Ready to play?"'
 ```
 
-Also: `TestFriendIngame`, `TestIncomingVoiceChat`, `TestFriendInviteRollup`,
-`TestCloudSyncConflict/Failure`; search `strTest:` in the bundle for the rest.
+Also: `TestFriendIngame`, `TestFriendInviteRollup`,
+`TestCloudSyncConflict/Failure`; search `strTest:` in the bundle for the
+rest. **Never TestIncomingVoiceChat** — the fake call cannot resolve and
+wedges Steam's toast queue until restart (docs/architecture.md).
 
 Server (eSource=2) types — their shipped test methods are stubbed, so these
 inject through Steam's real `OnServerNotification` ingestion:
@@ -119,16 +120,12 @@ The only real-event self-service trigger is download completion:
 steam steam://uninstall/1073390 && steam steam://install/1073390   # Aircar, 0.89GB
 ```
 
-Overlay door probes (raw calls behind the click bridge; results land in the
-plugin log). The probe list is `info` / `activate` / `dialog` / `media` —
-the old `--overlay-open` (openexternal) probe is gone with the dead end it
-tested:
+Diagnostics (results land in the plugin log):
 
 ```sh
-tools/fire --overlay-info                        # dump the overlay browser map
-tools/fire --overlay-activate <appid> <url>      # web page via the ingestion
-tools/fire --overlay-dialog <appid> settings     # named dialog (settings, requestplaytime, ...)
-tools/fire --overlay-media <appid>               # Recordings & Screenshots view
+tools/fire --overlay-info                # dump the overlay browser map
+tools/fire --replay inspect              # dump the stashed handler entries
+tools/fire --replay invoke [toast-name]  # invoke a stashed handler, no click
 ```
 
 ## 5. Read the verdict (`tools/capture`, section 3)
@@ -140,13 +137,13 @@ tools/fire --overlay-media <appid>               # Recordings & Screenshots view
 | `dev-fire: NotificationStore.X is not a function` | wrong test method name |
 | `dev-fire: server notification store not found` | bundle reshuffle — see `steam-update-smoke` |
 | `from-toast ... type=N (Name) source=... fields=...` | extraction worked; check the fields |
-| `toast ... -> {"title":...,"route":...,"ingame":...}` | what was delivered: the URL route and the action token |
+| `toast ... -> {"title":...,"type":N,"route":"replay:..."}` | what was delivered; `route` is the replay token |
 | `toast ... -> {...} (suppressed: ... notifications off)` | the surface toggle kept it off the desktop; not a break |
 | `click-bridge: <payload>` | a click was consumed from the click file |
 | `overlay: ... appid=N` | a surface door opened (chat room, screenshot, clip, media, playtime, web page) |
 
 Click-path signatures beyond these (stale drops, door failures, the stashed
-toast context): the vocabulary table in `docs/HANDOFF.md`, "The click
+toast context): the vocabulary table in `docs/architecture.md`, "The click
 architecture".
 
 Known gates that swallow fires silently:
@@ -175,5 +172,5 @@ Known gates that swallow fires silently:
 - **The desktop notification's click window is bounded**: quickshell expires
   the popup after ~8s despite `-t 0`, the action dies with it, and the
   notification-centre copy is inert. Click within ~8s.
-- A click that does nothing is CORRECT when both route and action token are
+- A click that does nothing is CORRECT when the toast carried no replay token —
   null — mirror Steam.
