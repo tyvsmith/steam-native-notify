@@ -103,6 +103,12 @@ windows (or after Steam quits) does nothing, by design. Every consumed click
 logs a `click-bridge:` line — no line means the bridge was not armed or the
 poll ended.
 
+**Never fire TestIncomingVoiceChat.** A fake incoming call has no caller to
+hang up: its notification never resolves, and once its toast has shown,
+every later toast queues behind it until Steam restarts. Verified by A/B
+with zero clicks and zero invokes (2026-08-29); not a plugin defect. Real
+voice chats resolve when the caller hangs up.
+
 **Read a failed `tools/fire` correctly.** No `dev-fire:` log line means the
 settings toggle is off. A `dev-fire:` line with no `from-toast` line means one
 of Steam's own gates ate the toast (SystemUpdate's weekly gate, the user's
