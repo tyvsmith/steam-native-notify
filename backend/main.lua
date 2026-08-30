@@ -44,14 +44,16 @@ end
 
 --- Write the bundled helper into RUNTIME_DIR. Runs on every load, so the
 --- on-disk copy always matches the packed plugin. Spawned through `sh`
---- (io.open cannot set an executable bit, and does not need to).
+--- (io.open cannot set an executable bit, and does not need to). Written in
+--- binary mode: a no-op on POSIX, and the only mode that keeps a packed
+--- asset byte-identical on Windows, where text mode rewrites line endings.
 local function install_helper()
     local content = millennium.assets.read(HELPER_ASSET)
     if type(content) ~= "string" or content == "" then
         return nil, "asset " .. HELPER_ASSET .. " missing from the plugin bundle"
     end
     fs.create_directories(RUNTIME_DIR)
-    local handle, err = io.open(HELPER, "w")
+    local handle, err = io.open(HELPER, "wb")
     if not handle then return nil, tostring(err) end
     handle:write(content)
     handle:close()
