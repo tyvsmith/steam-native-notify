@@ -130,7 +130,16 @@ action.
   produces no `RegisterForNotifications` event at all.
 - Toast artwork: `steamloopback.host/assets/<appid>/<file>` maps to
   `~/.local/share/Steam/appcache/librarycache/<appid>/<file>`; friend avatars
-  are public CDN URLs, fetched once and cached by notify-action.
+  are public CDN URLs, fetched once and cached by notify-action. The fetch
+  runs curl with `LD_LIBRARY_PATH`/`LD_PRELOAD` cleared — the helper inherits
+  Steam's loader environment, whose pinned_libs_64 libcurl the system curl
+  refuses.
+- A file-backed icon is sent as a `file://` reference in the `image-path`
+  hint (`-i` stays the themed fallback) so the daemon can copy it and the
+  icon survives into notification history; a path through `-i` becomes
+  in-process image-data that history rows lose. Every delivery also names
+  `steam.desktop` in a `desktop-entry` hint for app identity (name, logo
+  badge, per-app grouping on daemons that read it).
 - Notification actions must be named `default` to fire on a body click, and
   only while the popup is live, hence `-t 0`. The daemon does not auto-fire
   actions on expiry, so a logged click is a genuine click.

@@ -69,6 +69,14 @@ tools/notify-action --escape-markup 'a < b & c'
   that never advertised `body-markup` (or the caps query failed and the safe
   default kicked in).
 
+Icon signatures (verified 2026-08-30):
+
+| signature | meaning |
+|---|---|
+| icon on the live popup, missing on the history row | the sender passed pixels. Since 30982bf a file-backed icon rides the `image-path` hint as a `file://` reference (`-i` is the themed fallback) exactly so the daemon can copy and persist it. If this regresses, check the hint is present — `image-data` beats `image-path` if a path ever rides `-i` again |
+| uncached avatars show no icon anywhere (live included); library-cache art works | curl inherits Steam's loader environment when the helper is spawned by the backend, and Steam's pinned_libs_64 libcurl.so.4 makes the system curl fail (`CURL_OPENSSL_4' not found`). Since ef62247 resolve_icon runs curl with `LD_LIBRARY_PATH`/`LD_PRELOAD` cleared. Repro: run curl under Steam's env vars from `/proc/<steam-pid>/environ` |
+| wrong app identity — name, logo badge, grouping | delivery carries `-h string:desktop-entry:steam` (086fd4a); GNOME/KDE brand from it, quickshell resolves it into the appIcon slot. Missing identity means the hint was dropped, not the icon path |
+
 Full-chain manual run (blocks until the notification is clicked or dismissed):
 
 ```sh

@@ -77,6 +77,12 @@ steam -shutdown && sleep 15 && setsid uwsm-app -- gtk-launch steam.desktop
 `steam -shutdown` returns early, and a relaunch while the old instance lives is
 silently swallowed. If Steam is not up after the sleep, launch again.
 
+A healthy idle client can ignore `steam -shutdown` outright (observed three
+times, 2026-08-30: the process survived 30s+). Standard recovery: watch
+`pgrep -x steam` for up to ~30s, then `pkill -TERM -x steam`, wait ~8s, then
+`pkill -KILL -x steam` and `pkill -KILL -x steamwebhelper`. Always `-x`,
+never `-f` — a `-f` pattern matches the invoking shell.
+
 **Confirm the running .star before diagnosing anything.** `tools/capture` says
 so first. A stale build is indistinguishable from a broken feature.
 
