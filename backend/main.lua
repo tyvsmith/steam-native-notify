@@ -58,29 +58,27 @@ local function install_helper()
     return HELPER
 end
 
---- Takes ONE argument, a JSON string. Millennium does not pass an argument
---- object's keys through as named parameters: with two keys the values arrived
---- in the wrong order and the notification came out with summary and body
---- swapped, silently. One key cannot be reordered.
+--- Positional over the ffi bridge: title, body, image, route, ingame -- the
+--- same five slots handed on to tools/notify-action. (The old callable
+--- transport could not order multiple arguments, so everything once arrived
+--- as one JSON string.)
 ---
---- Called from the frontend via callable('Notify').
+--- Called from the frontend via ffi('Notify').
 --- Backgrounded: a notification daemon that is slow, restarting, or absent must
 --- never block the Steam UI thread that called into us.
 ---@ffi
----@param payload any
+---@param title any
+---@param body any
+---@param image any
+---@param route any
+---@param ingame any
 ---@return string
-function Notify(payload)
-    local ok, data = pcall(json.decode, tostring(payload or "{}"))
-    if not ok or type(data) ~= "table" then
-        log_line("error", "undecodable payload: " .. tostring(payload))
-        return "error"
-    end
-
-    local title = (data.title ~= nil and data.title ~= "") and data.title or APP_NAME
-    local body = data.body or ""
-    local raw_image = type(data.image) == "string" and data.image or ""
-    local route = type(data.route) == "string" and data.route or ""
-    local ingame = type(data.ingame) == "string" and data.ingame or ""
+function Notify(title, body, image, route, ingame)
+    title = (title ~= nil and title ~= "") and tostring(title) or APP_NAME
+    body = body ~= nil and tostring(body) or ""
+    local raw_image = image ~= nil and tostring(image) or ""
+    route = route ~= nil and tostring(route) or ""
+    ingame = ingame ~= nil and tostring(ingame) or ""
 
     -- This end is a marshaller: quote and hand over. Everything the daemon
     -- needs done to the values (markup escaping, icon resolution, the click)

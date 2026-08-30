@@ -1,4 +1,4 @@
-import { callable } from 'millennium';
+import { ffi } from 'millennium';
 
 /**
  * Diagnostics for the whole frontend, kept out of index so any module can log
@@ -10,12 +10,12 @@ import { callable } from 'millennium';
  * `click-bridge`. Renaming a prefix without updating tools/capture blinds
  * the triage tool.
  */
-const logLine = callable<[{ line: string }], string>('Log');
+const logLine = ffi<[string], string>('Log');
 
 /** Never throws: diagnostics must not take the notification path down. */
 export function dlog(line: string): void {
 	try {
-		void logLine({ line });
+		void logLine(line);
 	} catch {
 		/* the log is best-effort by design */
 	}

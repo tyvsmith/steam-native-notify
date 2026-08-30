@@ -1,4 +1,4 @@
-import { callable } from 'millennium';
+import { ffi } from 'millennium';
 import { dlog } from './log';
 import { CLICK_WINDOW_MS, invokeReplayHandler, REPLAY_CLICK_PREFIX } from './replay';
 
@@ -11,7 +11,7 @@ import { CLICK_WINDOW_MS, invokeReplayHandler, REPLAY_CLICK_PREFIX } from './rep
  * its handler -- and stops itself afterwards; an idle session polls
  * nothing.
  */
-const takeClick = callable<[], string>('TakeClick');
+const takeClick = ffi<[], string>('TakeClick');
 
 const CLICK_POLL_MS = 1000;
 /**
@@ -34,13 +34,14 @@ export function armClickBridge(): void {
 			return;
 		}
 		try {
-			// The click file holds a plain stamped string, so the callable's
-			// return needs exactly ONE unwrap -- parseCallableJson would parse
-			// twice (its payloads are JSON documents) and silently eat the
-			// route it just consumed. That bug shipped once; hence the log
-			// line on every consumed click.
+			// The click file holds a plain stamped string. A Lua string return
+			// has arrived both raw and JSON-quoted across Millennium transports
+			// (the old callable double-encoded; a wrong unwrap silently ate the
+			// route once) -- so unwrap only what is provably a JSON string, and
+			// keep the log line on every consumed click.
 			const raw = await takeClick();
-			const taken = typeof raw === 'string' && raw ? (JSON.parse(raw) as string) : '';
+			const taken =
+				typeof raw === 'string' && raw ? (raw.startsWith('"') ? (JSON.parse(raw) as string) : raw) : '';
 			if (typeof taken !== 'string' || !taken) return;
 			const sep = taken.indexOf('|');
 			const stamp = sep > 0 ? Number(taken.slice(0, sep)) : NaN;

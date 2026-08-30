@@ -1,4 +1,4 @@
-import { callable, definePlugin, IconsModule } from 'millennium';
+import { definePlugin, ffi, IconsModule } from 'millennium';
 import { notificationFromToast } from './notification';
 import { dlog, safeJson } from './log';
 import { armClickBridge } from './clickbridge';
@@ -40,12 +40,13 @@ interface SteamPopupManager {
 const TOAST_PREFIX = 'notificationtoasts_';
 
 /**
- * ONE key per callable. Millennium does not map an argument object's keys onto
- * the Lua parameter names -- with `{ title, body }` the values arrived in the
- * wrong order and produced a notification with its summary and body swapped. A
- * single JSON string has no ordering to get wrong.
+ * Positional over the ffi bridge: title, body, image, route, ingame -- the
+ * same five slots backend/main.lua hands to tools/notify-action. (The old
+ * callable transport mapped a multi-key argument object onto Lua parameters
+ * in no defined order -- summary and body once arrived swapped -- which is
+ * why everything used to travel as one JSON string.)
  */
-const notify = callable<[{ payload: string }], string>('Notify');
+const notify = ffi<[string, string, string, string, string], string>('Notify');
 
 /**
  * The popup window exists before it has painted, so a single settle delay is a
@@ -179,7 +180,7 @@ function deliverToast(win: Window, name: string, text: string): void {
 	// The backend/notify-action contract is unchanged (five positional args);
 	// the replay token travels in the route slot and comes back through the
 	// click file verbatim, so neither end needed to learn about replay.
-	if (!suppressed) void notify({ payload: safeJson({ title, body, image, route, ingame: null }) });
+	if (!suppressed) void notify(title, body, image ?? '', route ?? '', '');
 
 	// notify-action delivers every click back through a file; arm the bridge
 	// that picks it up and chooses the surface by live focus (clickbridge.ts).

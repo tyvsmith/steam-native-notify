@@ -1,4 +1,4 @@
-import { callable, findModuleExport } from 'millennium';
+import { ffi, findModuleExport } from 'millennium';
 import { dlog, safeJson } from './log';
 import { parseCallableJson, settings } from './settings';
 import { inspectReplayStash, invokeReplayHandler } from './replay';
@@ -17,7 +17,7 @@ import { inspectReplayStash, invokeReplayHandler } from './replay';
  * setting -- checked per tick, so the settings toggle takes effect without a
  * restart, and a disabled gate costs one boolean read every 3s.
  */
-const takeDevCommand = callable<[], string>('TakeDevCommand');
+const takeDevCommand = ffi<[], string>('TakeDevCommand');
 
 const DEV_POLL_MS = 3000;
 

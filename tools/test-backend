@@ -142,7 +142,7 @@ check("helper materialized verbatim",
 
 -- A notification with no route: the download-complete shape.
 executed = {}
-ok, err = pcall(Notify, '{"title":"Download Complete","body":"Aircar is ready","image":"https://steamloopback.host/assets/1073390/x.jpg?c=1","route":null}')
+ok, err = pcall(Notify, "Download Complete", "Aircar is ready", "https://steamloopback.host/assets/1073390/x.jpg?c=1", nil, nil)
 check("Notify with no route runs", ok, err)
 check("Notify spawned something", #executed == 1, tostring(#executed) .. " commands")
 if executed[1] then
@@ -155,7 +155,7 @@ end
 
 -- A notification with a route: the friend-message shape.
 executed = {}
-ok = pcall(Notify, '{"title":"NightFury","body":"hello","image":"","route":"steam://friends/message/76561198257837083"}')
+ok = pcall(Notify, "NightFury", "hello", "", "steam://friends/message/76561198257837083", nil)
 check("Notify with a route runs", ok)
 if executed[1] then
 	check("passes the route", executed[1]:find("steam://friends/message/", 1, true) ~= nil, executed[1])
@@ -164,14 +164,14 @@ end
 -- The body crosses to the helper raw; markup escaping is the helper's job,
 -- done next to the notify-send that renders it (asserted further down).
 executed = {}
-pcall(Notify, '{"title":"Someone","body":"a < b & c","image":"","route":null}')
+pcall(Notify, "Someone", "a < b & c", "", nil, nil)
 if executed[1] then
 	check("passes the body raw", executed[1]:find("'a < b & c'", 1, true) ~= nil, executed[1])
 end
 
 -- A shell metacharacter in the body must not escape its quoting.
 executed = {}
-pcall(Notify, [[{"title":"Someone","body":"; touch /tmp/pwned #","image":"","route":null}]])
+pcall(Notify, "Someone", "; touch /tmp/pwned #", "", nil, nil)
 if executed[1] then
 	check("quotes shell metacharacters", executed[1]:find("'; touch /tmp/pwned #'", 1, true) ~= nil, executed[1])
 end
@@ -238,10 +238,13 @@ check("TakeClick passes the stamped payload through verbatim",
 ok, taken = pcall(TakeClick)
 check("TakeClick consumes once", ok and taken == "", tostring(taken))
 
--- Garbage in must not throw.
+-- Every argument absent must not throw; the title falls back to the app name.
 executed = {}
-ok = pcall(Notify, "not json at all")
-check("survives an undecodable payload", ok)
+ok = pcall(Notify)
+check("survives absent arguments", ok)
+if executed[1] then
+	check("absent title falls back to the app name", executed[1]:find("'Steam'", 1, true) ~= nil, executed[1])
+end
 
 -- notify-action's click plan: every clickable payload rides the bridge, which
 -- picks the surface by live focus inside Steam; only a notification with
