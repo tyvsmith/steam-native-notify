@@ -1,46 +1,16 @@
 name: CI
 
 on:
-  push:
   pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test-and-pack:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-
-      # tools/test-backend runs backend/main.lua with Millennium stubbed.
-      - name: Install lua5.4
-        run: sudo apt-get update && sudo apt-get install -y lua5.4
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Typecheck
-        run: bun run typecheck
-
-      # Lua backend + notify-action seams (notify-send/gdbus shimmed), and
-      # the frontend's toast decode + click chooser, compiled offline.
-      - name: Tests
-        run: bun run test
-
-      # starlight packs the plugin; output_path=auto writes the .star under
-      # $HOME. The pack succeeding IS the packaging validation the runner can
-      # do -- a green pack still proves nothing about the running client
-      # (see AGENTS.md), but a red one blocks a broken bundle.
-      - name: Pack the plugin
-        run: bun run build
-
-      - name: Validate the packaged .star
-        run: |
-          star="$HOME/.local/share/millennium/plugins/me.tysmith.steam-native-notify.star"
-          test -f "$star" || { echo "no .star produced"; exit 1; }
-          size=$(stat -c%s "$star")
-          echo "packed: $star ($size bytes)"
-          # The healthy bundle is ~40KB; a near-empty pack means the frontend
-          # or an asset silently fell out of the bundle.
-          test "$size" -gt 20000 || { echo ".star suspiciously small"; exit 1; }
-          head -c 16 "$star" | grep -aq MILLENNIUM || echo "note: header magic not found in first bytes (informational)"
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      upload: ${{ github.event_name == 'push' }}

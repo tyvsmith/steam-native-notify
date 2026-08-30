@@ -1,0 +1,58 @@
+name: Build
+
+# Typecheck, test, pack and validate the plugin. Called by ci.yml and
+# release.yml; never triggered on its own.
+on:
+  workflow_call:
+    inputs:
+      upload:
+        description: Upload the packed .star as a run artifact
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+
+      # tools/test-backend runs backend/main.lua with Millennium stubbed.
+      - name: Install lua5.4
+        run: sudo apt-get update && sudo apt-get install -y lua5.4
+
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+
+      # Lua backend + notify-action seams (notify-send/gdbus shimmed), and
+      # the frontend's toast decode + click chooser, compiled offline.
+      - run: bun run test
+
+      # -o overrides millennium.toml's output_path=auto, which would install
+      # into $HOME/.local/share/millennium/plugins; the file is <dir>/<id>.star
+      # and starlight does not create <dir>.
+      - name: Pack
+        run: mkdir -p dist && ./node_modules/.bin/starlight pack -o dist
+
+      # A green pack still proves nothing about the running client (see
+      # AGENTS.md), but a red one blocks a broken bundle.
+      - name: Validate the .star
+        run: |
+          star=dist/me.tysmith.steam-native-notify.star
+          test -f "$star" || { echo "no .star produced"; exit 1; }
+          size=$(stat -c%s "$star")
+          echo "packed: $star ($size bytes)"
+          # The healthy bundle is ~44KB; a near-empty pack means the frontend
+          # or an asset silently fell out of the bundle.
+          test "$size" -gt 20000 || { echo ".star suspiciously small"; exit 1; }
+          head -c 16 "$star" | grep -aq MILLENNIUM || { echo "no MILLENNIUM shim header"; exit 1; }
+          # Parses the header and checks every section's CRC32.
+          ./node_modules/.bin/starlight verify "$star"
+
+      # archive: false keeps the artifact a bare .star, installable as downloaded.
+      - if: inputs.upload
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/me.tysmith.steam-native-notify.star
+          archive: false
+          if-no-files-found: error
