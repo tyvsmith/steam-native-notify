@@ -1,24 +1,23 @@
-import { DialogControlsSection, ToggleField } from 'millennium';
-import { loadSettings, settings, updateSettings, type Settings } from './settings';
+import { DialogControlsSection, ToggleField, usePluginConfig } from 'millennium';
+import { DEFAULTS, type Settings } from './settings';
 
-// window.SP_REACT is Steam's own React, typed by the millennium SDK as
-// `typeof React`; JSX itself compiles through the automatic runtime, which the
-// bundler maps onto Steam's JSX factory (window.SP_JSX_FACTORY).
+/**
+ * Every toggle is one usePluginConfig hook: the store is the state, writes go
+ * straight to Millennium's config (pushed to the backend and the settings()
+ * snapshot automatically), and a key never written yet reads as undefined --
+ * the DEFAULTS merge here is what a fresh install sees.
+ */
+function useToggle(key: keyof Settings): [boolean, (value: boolean) => void] {
+	const [value, setValue] = usePluginConfig<boolean>(key);
+	return [typeof value === 'boolean' ? value : DEFAULTS[key], (next) => void setValue(next)];
+}
+
 export function SettingsPanel() {
-	const { useState, useEffect } = window.SP_REACT;
-	const [s, setS] = useState<Settings>(settings());
-
-	useEffect(() => {
-		// The panel can be opened before the stored value has been read back.
-		void loadSettings().then((loaded) => setS({ ...loaded }));
-	}, []);
-
-	const toggle = (key: keyof Settings) => (value: boolean) => {
-		// Functional update: two toggles flipped in one render cycle must not
-		// lose the first to a stale closure.
-		setS((prev: Settings) => ({ ...prev, [key]: value }));
-		void updateSettings({ [key]: value });
-	};
+	const [notifyOutsideGame, setNotifyOutsideGame] = useToggle('notifyOutsideGame');
+	const [notifyInGame, setNotifyInGame] = useToggle('notifyInGame');
+	const [hideSteamToast, setHideSteamToast] = useToggle('hideSteamToast');
+	const [devFire, setDevFire] = useToggle('devFire');
+	const [devMode] = useToggle('devMode');
 
 	return (
 		<DialogControlsSection>
@@ -28,8 +27,8 @@ export function SettingsPanel() {
 					'Send Steam notifications to your desktop notification daemon while no ' +
 					'game has focus. Clicking one does what clicking the Steam toast would.'
 				}
-				checked={s.notifyOutsideGame}
-				onChange={toggle('notifyOutsideGame')}
+				checked={notifyOutsideGame}
+				onChange={setNotifyOutsideGame}
 			/>
 			<ToggleField
 				label="Use native notifications when inside games"
@@ -38,32 +37,32 @@ export function SettingsPanel() {
 					'Steam’s in-game toast. Turn off to keep in-game notifications ' +
 					'inside Steam only.'
 				}
-				checked={s.notifyInGame}
-				onChange={toggle('notifyInGame')}
+				checked={notifyInGame}
+				onChange={setNotifyInGame}
 			/>
 			{/* The development surface. devMode has no toggle of its own -- it is
 			    set out-of-band (tools/mep or the Millennium config file), so a
 			    normal install never shows these. */}
-			{s.devMode && (
+			{devMode && (
 				<ToggleField
 					label="Developer: hide Steam's own toasts"
 					description={
 						'Closes Steam’s popup once its text has been read, leaving only ' +
 						'the desktop notification.'
 					}
-					checked={s.hideSteamToast}
-					onChange={toggle('hideSteamToast')}
+					checked={hideSteamToast}
+					onChange={setHideSteamToast}
 				/>
 			)}
-			{s.devMode && (
+			{devMode && (
 				<ToggleField
 					label="Developer: accept test commands from tools/fire"
 					description={
 						'Lets the tools/fire script in the plugin repository push synthesized ' +
 						'test notifications through Steam’s own pipeline.'
 					}
-					checked={s.devFire}
-					onChange={toggle('devFire')}
+					checked={devFire}
+					onChange={setDevFire}
 				/>
 			)}
 		</DialogControlsSection>

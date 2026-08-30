@@ -100,38 +100,33 @@ function Notify(payload)
     return "ok"
 end
 
---- Settings are stored by Millennium, which persists them across updates. The
---- whole settings object travels as ONE JSON document under one key: the
---- frontend owns every name and default (its DEFAULTS merge absorbs a missing
---- or older shape), so adding a setting never touches this file. Earlier
---- builds stored hideSteamToast under its own key; read once as a fallback.
-local SETTINGS_KEY = "settings"
-
----@ffi
----@return string
-function LoadSettings()
-    local stored = millennium.config.get(SETTINGS_KEY)
-    if type(stored) == "string" and stored ~= "" then return stored end
-    -- Only a legacy value may appear here: an explicit key in this fallback
-    -- would override the frontend's DEFAULTS merge on a fresh install.
-    local legacy = millennium.config.get("hideSteamToast")
-    if legacy ~= nil then return json.encode({ hideSteamToast = legacy == true }) end
-    return "{}"
-end
-
----@ffi
----@param payload any
----@return string
-function SaveSettings(payload)
-    local text = tostring(payload or "")
-    local ok, data = pcall(json.decode, text)
-    if not ok or type(data) ~= "table" then
-        log_line("error", "undecodable settings: " .. text)
-        return "error"
+--- Settings live per-key in Millennium's config store: the panel writes them
+--- through usePluginConfig, the frontend snapshot subscribes to pushes, and
+--- this end never learns a setting name. Earlier builds stored the whole
+--- object as ONE JSON document under "settings" (and before that a bare
+--- hideSteamToast key, which already matches the per-key name); this one-time
+--- move runs before millennium.ready() so the frontend only ever sees
+--- per-key values. Existing per-key values always win over the document.
+local function migrate_legacy_settings()
+    local doc = millennium.config.get("settings")
+    if type(doc) ~= "string" or doc == "" then return end
+    local ok, data = pcall(json.decode, doc)
+    if ok and type(data) == "table" then
+        for key, value in pairs(data) do
+            if key == "nativeToastInGame" then
+                -- Retired key: nativeToastInGame=true meant "no desktop
+                -- delivery while a game has focus" -- notifyInGame=false.
+                if millennium.config.get("notifyInGame") == nil then
+                    millennium.config.set("notifyInGame", value ~= true)
+                end
+            elseif millennium.config.get(key) == nil then
+                millennium.config.set(key, value)
+            end
+        end
+    else
+        log_line("error", "legacy settings document undecodable, dropped: " .. doc)
     end
-
-    millennium.config.set(SETTINGS_KEY, text)
-    return "ok"
+    millennium.config.delete("settings")
 end
 
 ---@ffi
@@ -217,6 +212,8 @@ local function on_load()
     if fresh then fresh:close() end
 
     log_line("info", "backend loaded")
+
+    migrate_legacy_settings()
 
     local helper, err = install_helper()
     if helper then

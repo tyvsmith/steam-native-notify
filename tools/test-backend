@@ -42,6 +42,7 @@ package.preload["millennium"] = function()
 		config = {
 			get = function(k) return stored[k] end,
 			set = function(k, v) stored[k] = v end,
+			delete = function(k) stored[k] = nil end,
 		},
 		assets = {
 			read = function(path)
@@ -175,34 +176,32 @@ if executed[1] then
 	check("quotes shell metacharacters", executed[1]:find("'; touch /tmp/pwned #'", 1, true) ~= nil, executed[1])
 end
 
--- Settings round-trip through Millennium's config store as one JSON document;
--- the backend stores the payload verbatim and never learns a setting name.
-ok, err = pcall(SaveSettings, '{"hideSteamToast":true,"someFutureSetting":7}')
-check("SaveSettings runs", ok, err)
-check("SaveSettings stores the document verbatim",
-	stored.settings == '{"hideSteamToast":true,"someFutureSetting":7}', tostring(stored.settings))
-local loaded
-ok, loaded = pcall(LoadSettings)
-check("LoadSettings runs", ok, loaded)
-check("LoadSettings returns the document", loaded == stored.settings, tostring(loaded))
-ok = pcall(SaveSettings, "not json")
-check("SaveSettings survives garbage", ok)
-check("garbage is not stored", stored.settings ~= "not json", tostring(stored.settings))
+-- Settings live per-key in Millennium's config store; the backend's only job
+-- is the one-time move of the legacy one-document form, run at load. The
+-- retired nativeToastInGame key inverts into notifyInGame; existing per-key
+-- values always win over the document; the document is removed either way.
+stored.settings = '{"hideSteamToast":true,"devFire":true,"nativeToastInGame":true}'
+stored.devFire = nil
+stored.notifyInGame = nil
+ok = pcall(plugin.on_load)
+check("migration runs at load", ok)
+check("migration moves document keys per-key", stored.devFire == true, tostring(stored.devFire))
+check("migration inverts nativeToastInGame", stored.notifyInGame == false, tostring(stored.notifyInGame))
+check("migration removes the document", stored.settings == nil, tostring(stored.settings))
 
--- Migration: an install that stored hideSteamToast under its own key still
--- loads it until the first save writes the document.
-stored.settings = nil
-stored.hideSteamToast = true
-ok, loaded = pcall(LoadSettings)
-check("LoadSettings migrates the old key", ok and type(loaded) == "string" and loaded:find('"hideSteamToast":true', 1, true) ~= nil, tostring(loaded))
+stored.settings = '{"devFire":false}'
+pcall(plugin.on_load)
+check("existing per-key value wins over the document", stored.devFire == true, tostring(stored.devFire))
+check("losing document is removed too", stored.settings == nil, tostring(stored.settings))
 
--- A fresh install has neither a settings document nor the legacy key. The
--- fallback must be an EMPTY document: any explicit key here would override
--- the frontend's DEFAULTS merge (hideSteamToast ships on).
+stored.settings = "not json"
+pcall(plugin.on_load)
+check("garbage document is dropped", stored.settings == nil, tostring(stored.settings))
+
 stored.settings = nil
-stored.hideSteamToast = nil
-ok, loaded = pcall(LoadSettings)
-check("LoadSettings on a fresh install yields an empty document", ok and loaded == "{}", tostring(loaded))
+stored.notifyOutsideGame = nil
+pcall(plugin.on_load)
+check("fresh install seeds no keys", stored.notifyOutsideGame == nil, tostring(stored.notifyOutsideGame))
 
 -- Identity: shape only. The steamid comes from the machine's loginusers.vdf,
 -- which this test does not fabricate; present it must be a steamid64, absent

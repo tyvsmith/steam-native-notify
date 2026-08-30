@@ -1,11 +1,4 @@
-import { callable } from 'millennium';
-
-/**
- * Settings live in the backend; Lua's millennium.config does the persisting.
- * The frontend never learns where they are stored.
- */
-const loadSettingsRaw = callable<[], string>('LoadSettings');
-const saveSettingsRaw = callable<[{ payload: string }], string>('SaveSettings');
+import { pluginConfig, subscribePluginConfig } from 'millennium';
 
 export interface Settings {
 	/**
@@ -39,7 +32,7 @@ export interface Settings {
 	devMode: boolean;
 }
 
-const DEFAULTS: Settings = {
+export const DEFAULTS: Settings = {
 	notifyOutsideGame: true,
 	notifyInGame: true,
 	hideSteamToast: true,
@@ -49,7 +42,10 @@ const DEFAULTS: Settings = {
 
 /**
  * Read by the toast handler on every notification, so a toggle takes effect
- * immediately rather than at the next Steam start.
+ * immediately rather than at the next Steam start. Kept current by the
+ * subscription below: settings live per-key in Millennium's own config store
+ * (the panel writes them through usePluginConfig, the backend and tools/mep
+ * through millennium.config), and every write is pushed here automatically.
  */
 let current: Settings = { ...DEFAULTS };
 
@@ -57,10 +53,17 @@ export function settings(): Settings {
 	return current;
 }
 
+/** Fold one store value into the snapshot; unknown keys and types stay out. */
+function absorb(key: string, value: unknown): void {
+	if (key in DEFAULTS && typeof value === typeof DEFAULTS[key as keyof Settings]) {
+		current = { ...current, [key]: value };
+	}
+}
+
 /**
- * A callable's return value arrives JSON-encoded, so a Lua string comes back
- * wrapped in literal quote characters and needs unwrapping before it parses as
- * the object it represents.
+ * A backend return may arrive JSON-encoded (a Lua string wrapped in literal
+ * quote characters) or already decoded, depending on the transport; unwrap
+ * whichever shape arrives into the object it represents.
  */
 export function parseCallableJson<T>(raw: unknown, fallback: T): T {
 	if (typeof raw !== 'string') return (raw as T) ?? fallback;
@@ -73,43 +76,31 @@ export function parseCallableJson<T>(raw: unknown, fallback: T): T {
 	}
 }
 
+let subscribed = false;
+
 /**
- * Retried: a one-shot load once raced a slow backend at Steam start and
- * silently ran the whole session on DEFAULTS (observed 2026-08-29 -- the
- * devFire poll stayed dead with the toggle stored on). The backend's
- * LoadSettings always returns a parseable document, so anything else is a
- * not-ready backend, worth another try.
+ * pluginConfig talks to Millennium's own config store, not this plugin's
+ * backend, so the backend race the old document load retried around cannot
+ * happen; the short retry covers only the first frames of a cold start. The
+ * backend migrates any legacy stored document to per-key values before
+ * millennium.ready(), so this only ever sees the per-key form.
  */
 export async function loadSettings(): Promise<Settings> {
-	for (let attempt = 0; attempt < 15; attempt++) {
+	if (!subscribed) {
+		subscribed = true;
+		subscribePluginConfig((key, value) => absorb(key, value));
+	}
+	for (let attempt = 0; attempt < 5; attempt++) {
 		try {
-			const stored = parseCallableJson<(Partial<Settings> & { nativeToastInGame?: boolean }) | null>(
-				await loadSettingsRaw(),
-				null,
-			);
-			if (stored && typeof stored === 'object') {
-				// One retired key: nativeToastInGame=true meant "no desktop
-				// delivery while a game has focus" -- notifyInGame=false today.
-				if (typeof stored.nativeToastInGame === 'boolean' && typeof stored.notifyInGame !== 'boolean') {
-					stored.notifyInGame = !stored.nativeToastInGame;
-				}
-				current = { ...DEFAULTS, ...stored };
+			const all = await pluginConfig.getAll<Record<string, unknown>>();
+			if (all && typeof all === 'object') {
+				for (const [key, value] of Object.entries(all)) absorb(key, value);
 				return current;
 			}
 		} catch {
-			/* backend not up yet; retry below */
+			/* store not up yet; retry below */
 		}
-		await new Promise((resolve) => setTimeout(resolve, 1000));
-	}
-	return current;
-}
-
-export async function updateSettings(patch: Partial<Settings>): Promise<Settings> {
-	current = { ...current, ...patch };
-	try {
-		await saveSettingsRaw({ payload: JSON.stringify(current) });
-	} catch {
-		/* The value is already live; persistence can fail without breaking it. */
+		await new Promise((resolve) => setTimeout(resolve, 500));
 	}
 	return current;
 }
