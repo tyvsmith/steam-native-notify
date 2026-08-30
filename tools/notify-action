@@ -22,8 +22,25 @@
 
 set -u
 
+# Steam's loader environment is poison to system child binaries: its runtime
+# LD_LIBRARY_PATH pins an old libcurl.so.4 the system curl refuses
+# (CURL_OPENSSL_4 not found, verified 2026-08-30), and only path ordering
+# spares notify-send and gdbus. Scrubbed once here so every child is immune.
+unset LD_LIBRARY_PATH LD_PRELOAD
+
 APP_NAME="Steam"
+# The icon-theme name used whenever no real artwork can be resolved.
+FALLBACK_ICON="steam"
+# steam.desktop: GNOME and KDE brand the notification from it (app name, logo
+# badge, per-app grouping and settings); quickshell resolves it into the app
+# icon slot. Daemons that do not read it ignore it. Millennium never runs
+# under Flatpak Steam, so the native name is always right.
+DESKTOP_ENTRY="steam"
 RUNTIME_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/steam-native-notify"
+# Since the image-path hint (30982bf) the daemon receives a PATH into this
+# cache, not pixels: a file removed here can blank a history row on a daemon
+# that does not copy what it shows (quickshell copies its own; others
+# unverified). The 30-day prune leans on history only showing recent rows.
 CACHE="$RUNTIME_DIR/icons"
 LIBRARY_CACHE="$HOME/.local/share/Steam/appcache/librarycache"
 
@@ -114,18 +131,16 @@ resolve_icon() {
 		return
 	fi
 
-	mkdir -p "$CACHE" 2>/dev/null || { echo steam; return; }
+	mkdir -p "$CACHE" 2>/dev/null || { echo "$FALLBACK_ICON"; return; }
 	# Download to a temp name and rename, so an interrupted fetch cannot leave a
-	# truncated icon cached forever. Spawned from inside Steam, the runtime's
-	# LD_LIBRARY_PATH pins an old libcurl.so.4 that the system curl binary
-	# refuses (CURL_OPENSSL_4 not found, verified 2026-08-30), so curl runs
-	# with the loader vars cleared.
-	if env -u LD_LIBRARY_PATH -u LD_PRELOAD curl -fsSL --max-time 5 -o "$cached.part" "$raw" 2>/dev/null && [ -s "$cached.part" ]; then
+	# truncated icon cached forever. (The loader-env scrub curl depends on
+	# happens once at the top of the script.)
+	if curl -fsSL --max-time 5 -o "$cached.part" "$raw" 2>/dev/null && [ -s "$cached.part" ]; then
 		mv -f "$cached.part" "$cached"
 		echo "$cached"
 	else
 		rm -f "$cached.part" 2>/dev/null
-		echo steam
+		echo "$FALLBACK_ICON"
 	fi
 }
 
@@ -188,8 +203,17 @@ fi
 # quickshell's persisted state, 2026-08-30). A file reference the daemon can
 # copy survives -- and image-data beats image-path, so the path must not ALSO
 # ride -i.
+#
+# file://$icon is raw concatenation: a path holding # ? or % would mis-parse
+# in GLib/Qt URI parsers, but dunst strips file:// without percent-decoding,
+# so no encoding satisfies every daemon. Cache names are sha1 hashes; only a
+# hostile $XDG_CACHE_HOME or $HOME could smuggle those characters in.
+#
+# set -- because POSIX sh has no arrays and a quoted string would word-split
+# on a path with spaces. $1..$5 (consumed into named vars at the top) cease
+# to exist here: everything below must use the named vars.
 case $icon in
-/*) set -- -i steam -h "string:image-path:file://$icon" ;;
+/*) set -- -i "$FALLBACK_ICON" -h "string:image-path:file://$icon" ;;
 *) set -- -i "$icon" ;;
 esac
 
@@ -201,11 +225,7 @@ esac
 # silently then, so retry for ~30s rather than lose the notification; a
 # machine with no daemon at all gives up quietly.
 tries=0
-# desktop-entry names steam.desktop: GNOME and KDE brand the notification
-# from it (app name, logo badge, per-app grouping/settings). Daemons that do
-# not read it ignore it. Millennium never runs under Flatpak Steam, so the
-# native name is always right.
-until chosen=$(notify-send -a "$APP_NAME" -h string:desktop-entry:steam "$@" -t "$EXPIRE" \
+until chosen=$(notify-send -a "$APP_NAME" -h "string:desktop-entry:$DESKTOP_ENTRY" "$@" -t "$EXPIRE" \
 	-A "$ACTION=Open" "$title" "$body" 2>/dev/null); do
 	# Retry ONLY while the daemon is absent. A failure with the daemon
 	# reachable is something else (it may even have fired after the toast

@@ -378,6 +378,7 @@ if scrub_dir and scrub_dir ~= "" then
 	local cs = assert(io.open(scrub_dir .. "/curl", "w"))
 	cs:write([[#!/bin/sh
 [ -z "${LD_LIBRARY_PATH:-}" ] || exit 1
+[ -z "${LD_PRELOAD:-}" ] || exit 1
 out=""
 while [ $# -gt 1 ]; do [ "$1" = "-o" ] && out=$2; shift; done
 [ -n "$out" ] && printf 'x' > "$out"
@@ -446,8 +447,13 @@ printf '%%s\n' "$@" > %s/args
 exit 0
 ]]):format(iconargs_dir))
 	ns:close()
-	io.popen("chmod +x '" .. iconargs_dir .. "/notify-send'"):close()
-	io.popen("PATH='" .. iconargs_dir .. "':\"$PATH\" " .. root
+	-- gdbus shimmed to fail and the cache redirected: the block must never
+	-- touch the live session bus or the developer's real cache directory.
+	local ig = assert(io.open(iconargs_dir .. "/gdbus", "w"))
+	ig:write("#!/bin/sh\nexit 1\n")
+	ig:close()
+	io.popen("chmod +x '" .. iconargs_dir .. "/notify-send' '" .. iconargs_dir .. "/gdbus'"):close()
+	io.popen("XDG_CACHE_HOME='" .. iconargs_dir .. "' PATH='" .. iconargs_dir .. "':\"$PATH\" " .. root
 		.. "/tools/notify-action 'T' 'b' '" .. iconargs_dir .. "/avatar.jpg' ''; echo done"):read("*a")
 	local af = io.open(iconargs_dir .. "/args", "r")
 	local sent_args = af and af:read("*a") or "(no args)"
