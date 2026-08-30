@@ -385,16 +385,50 @@ exit 0
 ]])
 	cs:close()
 	io.popen("chmod +x '" .. scrub_dir .. "/curl'"):close()
-	local rh = io.popen("LD_LIBRARY_PATH='" .. scrub_dir .. "' XDG_CACHE_HOME='" .. scrub_dir
+	local rh = io.popen("LD_LIBRARY_PATH='" .. scrub_dir .. "' LD_PRELOAD='" .. scrub_dir
+		.. "/evil.so' XDG_CACHE_HOME='" .. scrub_dir
 		.. "' PATH='" .. scrub_dir .. "':\"$PATH\" " .. root
 		.. "/tools/notify-action --resolve-icon 'https://example.invalid/a.jpg'")
 	local resolved = rh and rh:read("*l") or "(nothing)"
 	if rh then rh:close() end
 	check("icon download scrubs the loader environment",
-		resolved ~= nil and resolved:find(scrub_dir, 1, true) ~= nil, tostring(resolved))
+		resolved ~= nil and resolved:find("/steam-native-notify/icons/", 1, true) ~= nil,
+		tostring(resolved))
 	io.popen("rm -rf '" .. scrub_dir .. "'"):close()
 else
 	print("  skip loader-scrub (mktemp failed)")
+end
+
+-- Resolving an icon prunes cache files untouched for 30 days and leaves fresh
+-- ones alone. curl is shimmed to succeed so the resolve itself completes.
+local prune_h = io.popen("mktemp -d")
+local prune_dir = prune_h:read("*l")
+prune_h:close()
+if prune_dir and prune_dir ~= "" then
+	local pc = assert(io.open(prune_dir .. "/curl", "w"))
+	pc:write([[#!/bin/sh
+out=""
+while [ $# -gt 1 ]; do [ "$1" = "-o" ] && out=$2; shift; done
+[ -n "$out" ] && printf 'x' > "$out"
+exit 0
+]])
+	pc:close()
+	io.popen("chmod +x '" .. prune_dir .. "/curl'"):close()
+	local prune_icons = prune_dir .. "/steam-native-notify/icons"
+	io.popen("mkdir -p '" .. prune_icons .. "'"):close()
+	io.popen("touch -d '40 days ago' '" .. prune_icons .. "/old.jpg'"):close()
+	io.popen("touch '" .. prune_icons .. "/new.jpg'"):close()
+	io.popen("XDG_CACHE_HOME='" .. prune_dir .. "' PATH='" .. prune_dir .. "':\"$PATH\" " .. root
+		.. "/tools/notify-action --resolve-icon 'https://example.invalid/a.jpg'; echo done"):read("*a")
+	local old_f = io.open(prune_icons .. "/old.jpg", "r")
+	local new_f = io.open(prune_icons .. "/new.jpg", "r")
+	check("stale cached icons are pruned, fresh ones survive",
+		old_f == nil and new_f ~= nil)
+	if old_f then old_f:close() end
+	if new_f then new_f:close() end
+	io.popen("rm -rf '" .. prune_dir .. "'"):close()
+else
+	print("  skip icon-prune (mktemp failed)")
 end
 
 -- A file-backed icon must travel as an image-path hint (a file:// reference),

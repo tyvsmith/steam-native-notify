@@ -68,28 +68,36 @@ daemon_parses_markup() {
 # Turn whatever the toast was showing into something notify-send can display.
 # Game art needs no fetch: Steam serves it from a virtual host whose paths map
 # one-to-one onto the on-disk library cache. A friend's avatar is on the public
-# CDN and has to be pulled once, then cached.
+# CDN and has to be pulled once, then cached. Prints either an absolute path
+# or the literal theme name $FALLBACK_ICON -- the caller dispatches on that.
 resolve_icon() {
 	raw=$1
-	[ -n "$raw" ] || { echo steam; return; }
+	[ -n "$raw" ] || { echo "$FALLBACK_ICON"; return; }
 
 	case $raw in
 	/*)
-		[ -f "$raw" ] && echo "$raw" || echo steam
+		[ -f "$raw" ] && echo "$raw" || echo "$FALLBACK_ICON"
 		return
 		;;
 	*steamloopback.host/assets/*)
 		tail=${raw#*steamloopback.host/assets/}
 		tail=${tail%%\?*}
-		[ -f "$LIBRARY_CACHE/$tail" ] && echo "$LIBRARY_CACHE/$tail" || echo steam
+		[ -f "$LIBRARY_CACHE/$tail" ] && echo "$LIBRARY_CACHE/$tail" || echo "$FALLBACK_ICON"
 		return
 		;;
 	http://* | https://*) ;;
 	*)
-		echo steam
+		echo "$FALLBACK_ICON"
 		return
 		;;
 	esac
+
+	# Prune cached avatars untouched for 30 days, before the lookup below so it
+	# can never remove this run's icon between resolve and notify-send. Losing
+	# one is safe: the daemon persists its own copy of every icon it shows, and
+	# a pruned icon is simply re-downloaded on next use. Best-effort only --
+	# housekeeping must never block delivery.
+	[ -d "$CACHE" ] && find "$CACHE" -type f -mtime +30 -exec rm -f {} + >/dev/null 2>&1
 
 	stem=${raw%%\?*}
 	ext=${stem##*.}
