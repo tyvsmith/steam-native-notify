@@ -1,32 +1,32 @@
-# CLAUDE.md
+# AGENTS.md
 
 A Millennium plugin that mirrors Steam's in-client notification toasts to the
 desktop notification daemon, preserving the artwork and the click action.
+(CLAUDE.md is a symlink to this file.)
 
-`docs/HANDOFF.md` is the full context: verified facts, dead ends, and what is
-still open. Read it before non-trivial work. `docs/steam-routing.md` is the
-analysis of Steam's own click routing that every route cites;
-`docs/notification-types.md` is the generated type table.
+`docs/architecture.md` is the full context: the pipeline, the log
+vocabulary, verified facts, testing methodology, and dead ends. Read it
+before non-trivial work. `docs/steam-routing.md` is the analysis of Steam's
+own click handling; `docs/notification-types.md` maps type numbers to names;
+`docs/regeneration.md` restores the removed subsystems if ever needed.
 
 ## State
 
-**This branch (`feature/replay-click-path`) replaces the routing catalog with
-handler replay**, built out for a field comparison against main. At capture
-time frontend/replay.ts walks the toast's fiber tree and stashes the toast
-component's own onClick/onActivate (outermost, portal-bounded); a click writes
-`replay:<toast-name>` to `~/.cache/steam-native-notify/.click` and the click
-bridge invokes the stashed handler — Steam's own click, verbatim. routes.ts,
-urlstore.ts, identity.ts, overlay.ts and the doors are REMOVED here; main
-still has them. Known limit, measured in docs/experiments/click-replay.md:
-the handler is frozen to the surface the toast rendered on — one captured
-in-game and clicked after the game exits (or unfocused) silently no-ops where
-main routes to the desktop. The stash holds the latest 8 toasts for 120s;
-clicks past that (or after a Steam restart) do nothing.
+**Clicks are handler replay.** At capture time frontend/replay.ts walks the
+toast's fiber tree and stashes the click handler Steam attached to it,
+proven by choose.ts (identity twin or sole handler; ambiguity refuses and
+the toast stays unclickable — never a wrong action). A click writes
+`replay:<toast-name>` to `~/.cache/steam-native-notify/.click` and the
+bridge invokes the stash. Known limit, measured in
+docs/experiments/click-replay.md: the handler is frozen to the surface the
+toast rendered on — captured in-game and clicked after the game exits, it
+silently no-ops. The stash holds the latest 8 toasts for 120s; clicks past
+that (or after a Steam restart) do nothing.
 
-The routing catalog AND the generated protobuf schema are removed here;
-`docs/regeneration.md` records what they were, why, and how to bring either
-back, and branch `backup/routing-catalog` (pinned at main's tip) preserves
-the complete original implementation.
+The previous implementation — a hand-built routing catalog with live-focus
+surface selection, plus the generated protobuf schema — is preserved whole
+on branch `backup/routing-catalog`; `docs/regeneration.md` records what
+each piece was, why it left, and how to bring it back.
 
 ## Commands
 
