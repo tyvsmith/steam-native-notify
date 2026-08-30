@@ -9,16 +9,34 @@ local fs = require("fs")
 
 local APP_NAME = "Steam"
 
+-- Platform, decided once. Lua's package.config opens with the directory
+-- separator: "\" on Windows, "/" everywhere else (LuaJIT sets it like PUC
+-- Lua). Every path and spawn below branches on this, nothing else asks the
+-- OS. docs/windows-plan.md is the plan for the Windows half.
+local SEP = (type(package) == "table" and type(package.config) == "string")
+    and package.config:sub(1, 1) or "/"
+local IS_WINDOWS = SEP == "\\"
+local PLATFORM = IS_WINDOWS and "windows" or "posix"
+
 -- The packed .star is never unpacked on disk, so there is no plugin directory
 -- at runtime. Everything file-shaped lives in a cache directory instead: the
 -- notify-action helper is carried inside the .star as an asset and written out
 -- here at load, and tools/fire drops its command file here too. XDG_CACHE_HOME
--- to match the helper's own icon cache next door.
-local RUNTIME_DIR = (os.getenv("XDG_CACHE_HOME") or ((os.getenv("HOME") or "") .. "/.cache"))
-    .. "/steam-native-notify"
-local HELPER = RUNTIME_DIR .. "/notify-action"
+-- to match the helper's own icon cache next door; on Windows the per-user
+-- local (non-roaming) app data folder, the same role.
+local function runtime_dir()
+    if IS_WINDOWS then
+        local base = os.getenv("LOCALAPPDATA")
+            or ((os.getenv("USERPROFILE") or "") .. "\\AppData\\Local")
+        return base .. "\\steam-native-notify"
+    end
+    return (os.getenv("XDG_CACHE_HOME") or ((os.getenv("HOME") or "") .. "/.cache"))
+        .. "/steam-native-notify"
+end
+local RUNTIME_DIR = runtime_dir()
+local HELPER = RUNTIME_DIR .. SEP .. "notify-action"
 local HELPER_ASSET = "tools/notify-action"
-local LOG_FILE = RUNTIME_DIR .. "/plugin.log"
+local LOG_FILE = RUNTIME_DIR .. SEP .. "plugin.log"
 
 --- Millennium keeps a packed plugin's logger output in an in-memory buffer
 --- (readable in its UI log viewer) and never writes it to Steam's
@@ -191,7 +209,7 @@ end
 ---@ffi
 ---@return string
 function TakeDevCommand()
-    return consume(RUNTIME_DIR .. "/.dev-fire")
+    return consume(RUNTIME_DIR .. SEP .. ".dev-fire")
 end
 
 --- Click handoff: notify-action writes every clicked route (or action token)
@@ -201,7 +219,7 @@ end
 ---@ffi
 ---@return string
 function TakeClick()
-    return consume(RUNTIME_DIR .. "/.click")
+    return consume(RUNTIME_DIR .. SEP .. ".click")
 end
 
 local function on_load()
@@ -212,6 +230,7 @@ local function on_load()
     if fresh then fresh:close() end
 
     log_line("info", "backend loaded")
+    log_line("info", "platform: " .. PLATFORM .. " runtime: " .. RUNTIME_DIR)
 
     migrate_legacy_settings()
 
