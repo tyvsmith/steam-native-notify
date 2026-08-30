@@ -39,7 +39,10 @@ bun run test           # tools/test-backend (Lua, Millennium stubbed)
 tools/capture          # is the running .star current, did the hook attach,
                        # what did the last notifications carry
 tools/fire TestFriendOnline   # push a real test toast through Steam's pipeline
-                              # (needs the tools/fire toggle in plugin settings)
+                              # (needs the devFire toggle; the developer toggles
+                              #  only appear in the panel with devMode set in
+                              #  the settings document -- seed it via tools/mep
+                              #  or the Millennium config, see live-verify)
 tools/fire --server 3 '{...}' # inject a server rollup through OnServerNotification
 tools/mep --methods    # talk to Millennium's external protocol (dev only)
 tools/fire --replay inspect   # dump the stashed handler candidates

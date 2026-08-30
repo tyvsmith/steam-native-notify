@@ -171,15 +171,16 @@ function deliverToast(win: Window, name: string, text: string): void {
 	} catch (e) {
 		dlog(`from-toast ${name} failed: ${(e as Error)?.message ?? e}`);
 	}
-	// An overlay-context toast is one Steam already showed inside the focused
-	// game. With nativeToastInGame on, that toast is the notification: nothing
-	// is sent to the desktop and Steam's popup is left alone (hideSteamToast
-	// included). The capture and logs above still run, so tools/capture and
-	// the observability contract are unchanged.
-	const suppressed = overlayCtx && settings().nativeToastInGame;
+	// Delivery is gated per surface by the two user-facing toggles: desktop
+	// notifications for desktop-context toasts (notifyOutsideGame) and for
+	// overlay-context toasts (notifyInGame). A suppressed toast is left
+	// entirely to Steam -- nothing sent, popup not closed (hideSteamToast
+	// included). Capture and logs still run, so tools/capture and the
+	// observability contract are unchanged.
+	const suppressed = overlayCtx ? !settings().notifyInGame : !settings().notifyOutsideGame;
 	dlog(
 		`toast ${name} -> ${safeJson({ title, body, image, type, route })}` +
-			(suppressed ? ' (suppressed: native in-game)' : ''),
+			(suppressed ? ` (suppressed: ${overlayCtx ? 'in-game' : 'desktop'} notifications off)` : ''),
 	);
 	// The backend/notify-action contract is unchanged (five positional args);
 	// the replay token travels in the route slot and comes back through the

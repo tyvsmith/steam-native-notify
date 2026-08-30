@@ -64,7 +64,7 @@ python3-msgpack):
 ```sh
 tools/mep plugin.config.get name=me.tysmith.steam-native-notify key=settings   # read current first
 tools/mep plugin.config.set name=me.tysmith.steam-native-notify key=settings \
-  value='"{\"hideSteamToast\":false,\"nativeToastInGame\":false,\"devFire\":true}"'
+  value='"{\"notifyOutsideGame\":true,\"notifyInGame\":true,\"hideSteamToast\":false,\"devFire\":true,\"devMode\":true}"'
 ```
 
 With Steam stopped, the same document can be seeded directly in
@@ -76,11 +76,13 @@ With Steam stopped, the same document can be seeded directly in
   `LoadSettings` silently falls back to defaults.
 - MEP config writes never reach a running frontend (verified dead end): the
   preset takes effect at the next frontend load, i.e. the next Steam restart.
-- The write replaces the whole document — carry `hideSteamToast` and
-  `nativeToastInGame` too.
-- `nativeToastInGame` ON suppresses desktop delivery for overlay-context
-  toasts: an in-game fire then logs `toast ... (suppressed: native in-game)`
-  and nothing reaches the daemon. Not a break.
+- The write replaces the whole document — carry every key.
+- `devMode` gates the developer toggles in the panel (there is deliberately
+  no UI for it); `devFire` gates the poll itself.
+- `notifyInGame` OFF suppresses desktop delivery for overlay-context toasts:
+  an in-game fire then logs `toast ... (suppressed: in-game notifications
+  off)` and nothing reaches the daemon. `notifyOutsideGame` is the same gate
+  for desktop-context toasts. Not a break.
 
 ## 4. Fire
 
@@ -139,7 +141,7 @@ tools/fire --overlay-media <appid>               # Recordings & Screenshots view
 | `dev-fire: server notification store not found` | bundle reshuffle — see `steam-update-smoke` |
 | `from-toast ... type=N (Name) source=... fields=...` | extraction worked; check the fields |
 | `toast ... -> {"title":...,"route":...,"ingame":...}` | what was delivered: the URL route and the action token |
-| `toast ... -> {...} (suppressed: native in-game)` | `nativeToastInGame` kept it off the desktop; not a break |
+| `toast ... -> {...} (suppressed: ... notifications off)` | the surface toggle kept it off the desktop; not a break |
 | `click-bridge: <payload>` | a click was consumed from the click file |
 | `overlay: ... appid=N` | a surface door opened (chat room, screenshot, clip, media, playtime, web page) |
 

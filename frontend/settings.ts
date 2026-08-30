@@ -8,27 +8,44 @@ const loadSettingsRaw = callable<[], string>('LoadSettings');
 const saveSettingsRaw = callable<[{ payload: string }], string>('SaveSettings');
 
 export interface Settings {
-	/** Close Steam's own toast once its text has been read. */
+	/**
+	 * Send desktop notifications for toasts Steam renders on the desktop
+	 * surface (no game focused). One of the two user-facing toggles.
+	 */
+	notifyOutsideGame: boolean;
+	/**
+	 * Send desktop notifications for toasts Steam renders in a game's
+	 * overlay (game focused). The other user-facing toggle; off means
+	 * in-game notifications stay Steam's alone.
+	 */
+	notifyInGame: boolean;
+	/** Dev: close Steam's own toast once its text has been read. */
 	hideSteamToast: boolean;
 	/**
-	 * Leave overlay-context toasts alone: while a game has focus, Steam's own
-	 * in-game toast stays as-is and no desktop notification is sent (nor is
-	 * the toast closed, whatever hideSteamToast says). Desktop-context toasts
-	 * are unaffected.
-	 */
-	nativeToastInGame: boolean;
-	/**
-	 * Accept commands from tools/fire (devfire.ts). A name-and-args door into
-	 * Steam's notification stores for anything that can write the command file
-	 * in the plugin's cache directory, so it ships off.
+	 * Dev: accept commands from tools/fire (devfire.ts). A name-and-args door
+	 * into Steam's notification stores for anything that can write the command
+	 * file in the plugin's cache directory, so it ships off.
 	 */
 	devFire: boolean;
+	/**
+	 * Shows the developer toggles in the settings panel. Deliberately has no
+	 * toggle of its own: set it out-of-band (tools/mep plugin.config.set, or
+	 * ~/.config/millennium/config.json while Steam is down) so normal users
+	 * never see the development surface.
+	 */
+	devMode: boolean;
 }
 
-const DEFAULTS: Settings = { hideSteamToast: false, nativeToastInGame: false, devFire: false };
+const DEFAULTS: Settings = {
+	notifyOutsideGame: true,
+	notifyInGame: true,
+	hideSteamToast: false,
+	devFire: false,
+	devMode: false,
+};
 
 /**
- * Read by the toast handler on every notification, so the toggle takes effect
+ * Read by the toast handler on every notification, so a toggle takes effect
  * immediately rather than at the next Steam start.
  */
 let current: Settings = { ...DEFAULTS };
@@ -55,7 +72,16 @@ export function parseCallableJson<T>(raw: unknown, fallback: T): T {
 
 export async function loadSettings(): Promise<Settings> {
 	try {
-		current = { ...DEFAULTS, ...parseCallableJson<Partial<Settings>>(await loadSettingsRaw(), {}) };
+		const stored = parseCallableJson<Partial<Settings> & { nativeToastInGame?: boolean }>(
+			await loadSettingsRaw(),
+			{},
+		);
+		// One retired key: nativeToastInGame=true meant "no desktop delivery
+		// while a game has focus", which is notifyInGame=false today.
+		if (typeof stored?.nativeToastInGame === 'boolean' && typeof stored.notifyInGame !== 'boolean') {
+			stored.notifyInGame = !stored.nativeToastInGame;
+		}
+		current = { ...DEFAULTS, ...stored };
 	} catch {
 		current = { ...DEFAULTS };
 	}
