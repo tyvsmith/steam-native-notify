@@ -1,5 +1,14 @@
 import { fieldsForType } from './generated/notifications';
-import type { PbValue, ServerNotification } from './routes';
+
+/** A decoded protobuf scalar; repeated fields are not represented (none read). */
+export type PbValue = number | bigint | string;
+
+/** The server (eSource=2) rollup, as the toast components receive it. */
+export interface ServerNotification {
+	type: number;
+	body: Record<string, unknown> | null;
+	url?: string;
+}
 
 /**
  * "React tree -> typed notification", in one place.
@@ -21,15 +30,6 @@ export type DecodedNotification =
 
 /** eSource on Steam's notification object: which of the two systems produced it. */
 const SOURCE_SERVER = 2;
-
-/** Set as a side effect of the walk; consumed once by the caller. */
-let foundBrowserInfo: unknown = null;
-
-export function takeToastBrowserInfo(): unknown {
-	const v = foundBrowserInfo;
-	foundBrowserInfo = null;
-	return v;
-}
 
 /**
  * The notification Steam attached to the toast, read out of the React tree.
@@ -60,31 +60,9 @@ export function notificationFromToast(win: Window): DecodedNotification | null {
 		}
 		if (!node || !key) return null;
 
-		// The walk continues past the notification-bearing fiber: the
-		// per-surface browserInfo (which the chat dialogs key on) lives on a
-		// context provider ABOVE the toast component -- as the provider's
-		// `value` (the popup object with params.browserInfo) or as plain props
-		// higher up. Returning early would miss it.
 		let fiber: any = (node as any)[key];
 		for (let depth = 0; fiber && depth < 30; depth++) {
 			const props = fiber.memoizedProps ?? fiber.pendingProps;
-			// Guarded separately: a provider whose value has a throwing getter
-			// must not take down an already-decoded notification, and the
-			// FIRST hit wins -- the nearest provider is the toast's own
-			// context; an outer browserInfo-shaped object is not.
-			if (!foundBrowserInfo) {
-				try {
-					const bi =
-						props?.browserInfo ??
-						props?.params?.browserInfo ??
-						props?.value?.params?.browserInfo ??
-						props?.value?.browserInfo;
-					if (bi && typeof bi === 'object') foundBrowserInfo = bi;
-				} catch {
-					/* a hostile getter on some provider; keep walking */
-				}
-			}
-
 			const notification = props?.notification;
 			if (!decoded && notification && typeof notification === 'object') {
 				const type = Number((notification as any).eType);
@@ -125,6 +103,7 @@ export function notificationFromToast(win: Window): DecodedNotification | null {
 					decoded = { source: 'client', type, fields };
 				}
 			}
+			if (decoded) break;
 			fiber = fiber.return;
 		}
 		return decoded;

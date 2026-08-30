@@ -1,8 +1,7 @@
 import { callable, findModuleExport } from 'millennium';
 import { dlog, safeJson } from './log';
 import { parseCallableJson, settings } from './settings';
-import { openDialogInOverlay, openInOverlay, openMediaInOverlay } from './overlay';
-import { closeMainWindowForExperiment, inspectReplayStash, invokeReplayHandler } from './replay';
+import { inspectReplayStash, invokeReplayHandler } from './replay';
 
 /**
  * The tools/fire door: dev machinery, fenced off from the capture path.
@@ -85,51 +84,24 @@ function injectServerNotification(type: number, body: unknown): void {
 }
 
 /**
- * Overlay research probes, from the in-game click investigation (2026-08-29).
- * The production door lives in overlay.ts; these keep the raw calls testable:
- * `info` dumps the overlay browser map, `activate` fires the synthetic
- * request -- the probe that proved the mechanism, now what the click bridge
- * uses.
+ * Overlay diagnostics: `info` dumps the overlay browser map (which games have
+ * a live overlay surface). The door probes that drove the routing catalog
+ * left with the catalog; this one stays because "does an overlay exist" is
+ * the question the replay path's known limit turns on.
  */
-async function runOverlayProbe(probe: { call?: string; appid?: number; url?: string }): Promise<void> {
+async function runOverlayProbe(probe: { call?: string }): Promise<void> {
 	try {
-		await runOverlayProbeInner(probe);
+		if (probe.call !== 'info') {
+			dlog(`overlay probe: unknown call ${String(probe.call)}`);
+			return;
+		}
+		const sc: any = Reflect.get(globalThis, 'SteamClient');
+		const info = await sc?.Overlay?.GetOverlayBrowserInfo?.();
+		dlog(`overlay-info: ${safeJson(info)}`.slice(0, 1500));
 	} catch (e) {
 		// Fired with `void` from the poll: a rejection here would otherwise
-		// escape as an unhandled rejection with no log line -- exactly when
-		// the probes matter (a post-update API reshuffle).
+		// escape as an unhandled rejection with no log line.
 		dlog(`overlay probe failed: ${(e as Error)?.message ?? e}`);
-	}
-}
-
-async function runOverlayProbeInner(probe: { call?: string; appid?: number; url?: string }): Promise<void> {
-	switch (probe.call) {
-		case 'info': {
-			const sc: any = Reflect.get(globalThis, 'SteamClient');
-			const info = await sc?.Overlay?.GetOverlayBrowserInfo?.();
-			dlog(`overlay-info: ${safeJson(info)}`.slice(0, 1500));
-			return;
-		}
-		case 'activate': {
-			if (!openInOverlay(probe.appid ?? 0, probe.url ?? '')) {
-				dlog('overlay probe: store not found');
-			}
-			return;
-		}
-		case 'dialog': {
-			if (!openDialogInOverlay(probe.appid ?? 0, probe.url ?? '')) {
-				dlog('overlay probe: store not found');
-			}
-			return;
-		}
-		case 'media': {
-			if (!openMediaInOverlay(probe.appid ?? 0)) {
-				dlog('overlay probe: media door failed');
-			}
-			return;
-		}
-		default:
-			dlog(`overlay probe: unknown call ${String(probe.call)}`);
 	}
 }
 
@@ -142,7 +114,7 @@ export function startDevFirePoll(): void {
 				call?: string;
 				args?: unknown[];
 				server?: { type: number; body?: unknown };
-				overlay?: { call?: string; appid?: number; url?: string };
+				overlay?: { call?: string };
 				replay?: { call?: string; name?: string };
 			} | null>(raw, null);
 			if (!cmd) return;
@@ -150,12 +122,11 @@ export function startDevFirePoll(): void {
 				void runOverlayProbe(cmd.overlay);
 				return;
 			}
-			// Experiment probe (docs/experiments/click-replay.md): inspect the
-			// handler stash or invoke a stashed handler. Both never throw.
+			// Replay diagnostics: inspect the handler stash, or invoke a stashed
+			// handler without a desktop click. Both never throw.
 			if (cmd.replay) {
 				if (cmd.replay.call === 'inspect') inspectReplayStash();
 				else if (cmd.replay.call === 'invoke') invokeReplayHandler(cmd.replay.name);
-				else if (cmd.replay.call === 'close-main') closeMainWindowForExperiment();
 				else dlog(`replay: unknown call ${String(cmd.replay.call)}`);
 				return;
 			}

@@ -1,22 +1,25 @@
 import { dlog } from './log';
 
 /**
- * Experiment probe (docs/experiments/click-replay.md): find and stash the
- * toast component's own click handler at capture time, so a later desktop
- * click could replay Steam's click logic verbatim instead of mirroring it
- * through routes.ts and the overlay doors.
+ * The replay click path: every notification click re-runs Steam's own click
+ * handler, taken from the toast's React tree at capture time.
  *
  * The walk starts from the toast popup's first fiber-keyed element, climbs to
- * the tree's root, then traverses downward (child/sibling) collecting every
- * fiber whose memoizedProps carries a function-valued onClick or onActivate.
- * The OUTERMOST hit (shallowest depth, first in traversal order) is stashed as
- * the replay candidate: inner buttons (tray options, voice-chat accept) carry
- * their own handlers that ACT rather than navigate, so depth order is the
- * generic disambiguator.
+ * the popup's portal root, then traverses downward (child/sibling) collecting
+ * every fiber whose memoizedProps carries a function-valued onClick or
+ * onActivate. The OUTERMOST hit (shallowest, first in traversal order) is
+ * stashed per toast name: inner buttons (tray options, voice-chat accept)
+ * carry handlers that ACT rather than navigate, so depth order is the generic
+ * disambiguator. The click bridge later invokes the stashed handler by name.
  *
- * Everything here is diagnostics-grade: every fn.toString(), every property
- * read, and every invoke is try-wrapped, and a failed walk changes nothing
- * about delivery.
+ * Validated live 2026-08-29 (docs/experiments/click-replay.md): the closure
+ * survives the toast window's death in every tested form and replays Steam's
+ * click verbatim. Known limit, measured there: the handler is FROZEN to the
+ * surface the toast rendered on -- one captured in a game's overlay invoked
+ * after that overlay died returns without throwing and does nothing.
+ *
+ * Diagnostics never throw: every fn.toString(), property read, and invoke is
+ * try-wrapped, and a failed walk only costs that toast its click.
  */
 
 interface Candidate {
@@ -37,12 +40,14 @@ interface StashEntry {
 }
 
 /**
- * Latest N toasts, insertion-ordered. Production would expire entries with the
- * click-arm window (clickbridge.ts's 120s); the experiment holds them long
- * enough to run the 10-minute lifecycle cell, which is the point of the probe.
+ * A stashed closure pins its captured scope, so the stash is bounded: the
+ * latest STASH_MAX toasts, expired at STASH_TTL_MS. The TTL matches the click
+ * bridge's arm window (clickbridge.ts ARM_WINDOW_MS -- keep in sync): a click
+ * the bridge would still consume must find its handler, and anything older is
+ * already dropped as stale before it gets here.
  */
 const STASH_MAX = 8;
-const EXPERIMENT_TTL_MS = 30 * 60_000;
+const STASH_TTL_MS = 120_000;
 
 const SNIPPET_LEN = 200;
 const MAX_FIBERS = 5000;
@@ -50,7 +55,7 @@ const MAX_FIBERS = 5000;
 const stash = new Map<string, StashEntry>();
 
 function pruneStash(): void {
-	const cutoff = Date.now() - EXPERIMENT_TTL_MS;
+	const cutoff = Date.now() - STASH_TTL_MS;
 	for (const [key, entry] of stash) {
 		if (entry.stashedAt < cutoff) stash.delete(key);
 	}
@@ -78,9 +83,9 @@ function fnSnippet(fn: unknown): { fnName: string; snippet: string } {
 }
 
 /**
- * The toast popup is PORTAL-rendered from the main window's React tree
- * (observed: climbing to the absolute root and walking down swept 673
- * candidates -- window chrome, Millennium settings, the whole Steam UI). The
+ * The toast popup is PORTAL-rendered from the main window's React tree:
+ * climbing to the absolute root and walking down sweeps every clickable in
+ * the Steam UI (measured: 673 candidates, window chrome included). The
  * toast's own subtree hangs under a HostPortal fiber (tag 4) whose
  * containerInfo lives in the popup's document; that portal is the walk root.
  * Fallback when no portal is found: the highest fiber whose stateNode is
@@ -144,12 +149,14 @@ function collectCandidates(rootFiber: any): { candidates: Candidate[]; fns: ((e:
 
 /**
  * Walk the toast's tree and stash the outermost handler under the toast name.
- * Called from deliverToast; never throws, never changes delivery.
+ * Called from deliverToast before the popup can be closed; never throws,
+ * never blocks delivery. Returns whether a handler was stashed -- the
+ * notification is only made clickable when one was.
  */
-export function stashReplayCandidates(win: Window, name: string): void {
+export function stashReplayCandidates(win: Window, name: string): boolean {
 	try {
 		const doc = win.document;
-		if (!doc) return;
+		if (!doc) return false;
 
 		let fiber: any = null;
 		for (const el of Array.from(doc.querySelectorAll('*'))) {
@@ -161,7 +168,7 @@ export function stashReplayCandidates(win: Window, name: string): void {
 		}
 		if (!fiber) {
 			dlog(`replay: candidates ${name} n=0 (no fiber key in toast document)`);
-			return;
+			return false;
 		}
 
 		const { candidates, fns } = collectCandidates(toastSubtreeRoot(fiber, doc));
@@ -181,32 +188,10 @@ export function stashReplayCandidates(win: Window, name: string): void {
 		candidates.forEach((c, i) => {
 			dlog(`replay: candidate ${name} #${i} ${c.prop}@${c.depth} name=${c.fnName || '(anon)'} :: ${c.snippet}`);
 		});
+		return fns.length > 0;
 	} catch (e) {
 		dlog(`replay: walk failed for ${name}: ${(e as Error)?.message ?? e}`);
-	}
-}
-
-/**
- * Close the main window the way the titlebar X does, for the lifecycle
- * matrix's closed-to-tray cell. Driven from inside the client because the
- * compositor-side close needs a focused-window-safe dispatch this experiment
- * has no business risking.
- */
-export function closeMainWindowForExperiment(): void {
-	try {
-		const mgr: any = Reflect.get(globalThis, 'g_PopupManager');
-		const popups: Iterable<any> = mgr?.m_mapPopups?.values?.() ?? [];
-		for (const popup of popups) {
-			const win = popup?.window ?? popup?.m_popup;
-			if (typeof win?.name === 'string' && win.name.startsWith('SP Desktop')) {
-				dlog('replay: close-main -> closing the main window');
-				win.SteamClient?.Window?.Close?.();
-				return;
-			}
-		}
-		dlog('replay: close-main -> main window not found');
-	} catch (e) {
-		dlog(`replay: close-main failed: ${(e as Error)?.message ?? e}`);
+		return false;
 	}
 }
 
@@ -229,12 +214,12 @@ export function inspectReplayStash(): void {
 
 /**
  * Invoke a stashed handler with a stub event. No name targets the most recent
- * entry (the invoke command rides the same 3s dev poll as the fire, so the
- * on-screen lifecycle cell has no time to copy a toast name around). The
- * thrown error, if any, is logged verbatim: a throw AFTER the toast window
- * died is the experiment's kill signal, so it must reach the log intact.
+ * entry (the tools/fire probe rides the same poll as the fires, so the
+ * on-screen probes have no time to copy a toast name around). Thrown errors
+ * are logged verbatim and swallowed. Returns whether a live handler was found
+ * and ran without throwing.
  */
-export function invokeReplayHandler(name?: string): void {
+export function invokeReplayHandler(name?: string): boolean {
 	try {
 		let entry: StashEntry | undefined;
 		if (name) {
@@ -242,15 +227,20 @@ export function invokeReplayHandler(name?: string): void {
 		} else {
 			for (const e of stash.values()) entry = e; // last = most recent
 		}
+		const age = entry ? Math.round((Date.now() - entry.stashedAt) / 1000) : 0;
+		if (entry && Date.now() - entry.stashedAt > STASH_TTL_MS) {
+			dlog(`replay: invoke ${entry.name} -> expired (${age}s old)`);
+			stash.delete(entry.name);
+			return false;
+		}
 		if (!entry) {
 			dlog(`replay: invoke ${name ?? '(latest)'} -> no stash entry`);
-			return;
+			return false;
 		}
 		if (!entry.fn) {
 			dlog(`replay: invoke ${entry.name} -> entry has no handler`);
-			return;
+			return false;
 		}
-		const age = Math.round((Date.now() - entry.stashedAt) / 1000);
 		const chosen = entry.chosen ? `${entry.chosen.prop}@${entry.chosen.depth}` : '?';
 		dlog(`replay: invoke ${entry.name} ${chosen} age=${age}s`);
 		const stubEvent = {
@@ -260,12 +250,15 @@ export function invokeReplayHandler(name?: string): void {
 		try {
 			entry.fn(stubEvent);
 			dlog(`replay: invoke ${entry.name} -> returned without throwing`);
+			return true;
 		} catch (e) {
 			const err = e as Error;
 			dlog(`replay: invoke ${entry.name} -> THREW ${err?.name ?? ''}: ${err?.message ?? String(e)}`);
 			if (err?.stack) dlog(`replay: invoke stack: ${String(err.stack).replace(/\s+/g, ' ').slice(0, 500)}`);
+			return false;
 		}
 	} catch (e) {
 		dlog(`replay: invoke failed: ${(e as Error)?.message ?? e}`);
+		return false;
 	}
 }

@@ -12,7 +12,6 @@
     "gen": "bun tools/gen-proto.mjs",
     "proto:check": "bun tools/proto-sync.mjs --check",
     "proto:update": "bun tools/proto-sync.mjs --update",
-    "gen:table": "bun tools/gen-types-table.mjs",
     "typecheck": "tsc --noEmit",
     "prepare": "starlight lsp",
     "test": "tools/test-backend && bun tools/test-routes"

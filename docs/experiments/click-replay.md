@@ -47,6 +47,11 @@ Durability (step 5): not exercised — no Steam client update landed during
 the experiment. The memory criterion's heap-snapshot spot check was not
 done.
 
+Follow-up: despite the recommendation below, a full build-out was requested
+for field comparison — branch `feature/replay-click-path` replaces the
+catalog and doors with the replay path end to end, so the frozen-surface
+behavior can be felt in practice rather than argued from cells.
+
 **Recommended path: close the branch.** Full replay is dead: the regression
 cannot be detected after the fact (the no-op invoke raises no error to
 trigger a fallback), so a hybrid must decide BEFORE invoking, using exactly

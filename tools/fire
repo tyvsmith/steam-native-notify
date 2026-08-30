@@ -51,39 +51,15 @@ if [[ $1 == --wishlist ]]; then
   exit 0
 fi
 
-# Overlay research probes (in-game click investigation; see devfire.ts):
+# Overlay diagnostics (which games have a live overlay surface; devfire.ts):
 #   tools/fire --overlay-info                     dump overlay browser PIDs
-#   tools/fire --overlay-activate <appid> <url>   synthetic ActivateGameOverlayToWebPage
 if [[ $1 == --overlay-info ]]; then
   printf '{"overlay":{"call":"info"}}\n' >"$RUNTIME_DIR/.dev-fire"
   echo "queued: overlay info  (result lands in the plugin log)"
   exit 0
 fi
 
-if [[ $1 == --overlay-activate ]]; then
-  appid="${2:?--overlay-activate needs an appid}"
-  url="${3:?--overlay-activate needs a url}"
-  printf '{"overlay":{"call":"activate","appid":%s,"url":"%s"}}\n' "$appid" "$url" >"$RUNTIME_DIR/.dev-fire"
-  echo "queued: overlay activate appid=$appid"
-  exit 0
-fi
-
-if [[ $1 == --overlay-dialog ]]; then
-  appid="${2:?--overlay-dialog needs an appid}"
-  dialog="${3:?--overlay-dialog needs a dialog name (settings, requestplaytime, friends, ...)}"
-  printf '{"overlay":{"call":"dialog","appid":%s,"url":"%s"}}\n' "$appid" "$dialog" >"$RUNTIME_DIR/.dev-fire"
-  echo "queued: overlay dialog appid=$appid $dialog"
-  exit 0
-fi
-
-if [[ $1 == --overlay-media ]]; then
-  appid="${2:?--overlay-media needs an appid}"
-  printf '{"overlay":{"call":"media","appid":%s}}\n' "$appid" >"$RUNTIME_DIR/.dev-fire"
-  echo "queued: overlay media appid=$appid"
-  exit 0
-fi
-
-# Click-replay experiment probes (docs/experiments/click-replay.md):
+# Replay diagnostics (the click path on this branch; frontend/replay.ts):
 #   tools/fire --replay inspect          dump the stashed handler candidates
 #   tools/fire --replay invoke [name]    invoke a stashed handler (latest if
 #                                        no toast name is given)

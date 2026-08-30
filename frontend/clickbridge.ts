@@ -1,30 +1,17 @@
 import { callable } from 'millennium';
 import { dlog } from './log';
-import {
-	openChatInOverlay,
-	openChatOnDesktop,
-	openChatRoomDialog,
-	openClipInOverlay,
-	openDialogInOverlay,
-	openInOverlay,
-	openMediaInOverlay,
-	openPlaytimeDialog,
-	openScreenshotInOverlay,
-	overlayFocusedAppId,
-	runningOverlayAppId,
-} from './overlay';
+import { invokeReplayHandler } from './replay';
 
 /**
  * The click bridge: every notification click is delivered through here.
  *
- * tools/notify-action writes the clicked route (or action token) to a click
- * file, and this end consumes it, checks which game window is focused RIGHT
- * NOW (overlay.ts tracks the client's own focus signal), and opens the
- * destination on the right surface: the overlay doors for the focused game,
- * the same doors retargeted at the desktop instance (appid 0) or the client's
- * URL executor otherwise. External steam:// URLs cannot do this: the client's
- * handlers pick the overlay whenever a game is running, and raise the main
- * window over a focused game.
+ * tools/notify-action writes the clicked payload to a click file, and this
+ * end consumes it. On this branch the payload is a replay token
+ * (`replay:<toast-name>`): the click re-runs the handler Steam attached to
+ * that toast, stashed at capture time (replay.ts). Surface, navigation, and
+ * side effects are whatever Steam's own click does -- there is no routing
+ * catalog. Known limit (docs/experiments/click-replay.md): the handler is
+ * frozen to the surface the toast rendered on.
  *
  * The poll is armed by deliverToast for ARM_WINDOW_MS after each delivery and
  * stops itself afterwards, so an idle session polls nothing.
@@ -32,7 +19,7 @@ import {
 const takeClick = callable<[], string>('TakeClick');
 
 const CLICK_POLL_MS = 1000;
-const ARM_WINDOW_MS = 120_000;
+export const ARM_WINDOW_MS = 120_000;
 /**
  * notify-action stamps each click with its write time (<epoch-seconds>|
  * <payload>). The poll only runs while armed, so a click written after the
@@ -41,133 +28,11 @@ const ARM_WINDOW_MS = 120_000;
  */
 const CLICK_MAX_AGE_S = 30;
 
-const OPENURL_PREFIX = 'steam://openurl/';
+/** The payload prefix deliverToast hands notify-action for stashed toasts. */
+export const REPLAY_CLICK_PREFIX = 'replay:';
 
 let armedUntil = 0;
 let timer: number | null = null;
-
-/**
- * Raise the main window if it exists; closed to the tray, its popup is
- * destroyed and the appid-0 instance has no surface, so it is opened first
- * through the client's own URL executor (steam://open/main -- the same thing
- * launcher activation does). Returns true when the window already existed.
- */
-function ensureMainWindow(): boolean {
-	try {
-		const mgr: any = Reflect.get(globalThis, 'g_PopupManager');
-		const popups: Iterable<any> = mgr?.m_mapPopups?.values?.() ?? [];
-		for (const popup of popups) {
-			const win = popup?.window ?? popup?.m_popup;
-			if (typeof win?.name === 'string' && win.name.startsWith('SP Desktop')) {
-				win.SteamClient?.Window?.BringToFront?.();
-				return true;
-			}
-		}
-	} catch (e) {
-		dlog(`click-bridge: raise failed: ${(e as Error)?.message ?? e}`);
-	}
-	try {
-		dlog('click-bridge: main window closed; opening it');
-		const sc: any = Reflect.get(globalThis, 'SteamClient');
-		sc?.URL?.ExecuteSteamURL?.('steam://open/main');
-	} catch (e) {
-		dlog(`click-bridge: open main failed: ${(e as Error)?.message ?? e}`);
-	}
-	return false;
-}
-
-function mainWindowPresent(): boolean {
-	try {
-		const mgr: any = Reflect.get(globalThis, 'g_PopupManager');
-		const popups: Iterable<any> = mgr?.m_mapPopups?.values?.() ?? [];
-		for (const popup of popups) {
-			const win = popup?.window ?? popup?.m_popup;
-			if (typeof win?.name === 'string' && win.name.startsWith('SP Desktop')) return true;
-		}
-	} catch {
-		/* treated as absent */
-	}
-	return false;
-}
-
-/**
- * Run a desktop door once the main window is up. A freshly created window is
- * POLLED for (its popup appearing in g_PopupManager) rather than trusted to a
- * fixed delay: on a slow start a blind timer fires the door against nothing
- * and the click is silently lost.
- */
-function afterMainWindow(fn: () => void): void {
-	if (ensureMainWindow()) {
-		fn();
-		return;
-	}
-	const deadline = Date.now() + 6000;
-	const poll = window.setInterval(() => {
-		const present = mainWindowPresent();
-		if (!present && Date.now() < deadline) return;
-		window.clearInterval(poll);
-		if (!present) dlog('click-bridge: main window slow to appear; running the door anyway');
-		fn();
-	}, 250);
-}
-
-function chatRoomParts(route: string): [string, string] | null {
-	const parts = route.slice('action:chatroom:'.length).split(':');
-	return parts.length === 2 && parts[0] && parts[1] ? [parts[0], parts[1]] : null;
-}
-
-/**
- * One dispatch for the action tokens, on either surface: appid 0 is the
- * desktop instance (proven by the desktop chat fix; Steam's own desktop
- * clicks for these types open the media page and the playtime dialog in the
- * main window), any other appid the game's overlay. Adding a token here
- * covers both surfaces at once.
- */
-function runActionToken(appid: number, route: string): void {
-	const surface = appid === 0 ? 'desktop' : 'overlay';
-	let opened: boolean;
-	if (route.startsWith('action:chatroom:')) {
-		const parts = chatRoomParts(route);
-		if (!parts) {
-			dlog(`click-bridge: malformed action ${route}`);
-			return;
-		}
-		opened = openChatRoomDialog(appid, parts[0], parts[1]);
-	} else if (route.startsWith('action:screenshot:')) {
-		opened = openScreenshotInOverlay(appid, route.slice('action:screenshot:'.length));
-	} else if (route.startsWith('action:clip:')) {
-		opened = openClipInOverlay(appid, route.slice('action:clip:'.length));
-	} else if (route === 'action:media') {
-		opened = openMediaInOverlay(appid);
-	} else if (route === 'action:requestplaytime') {
-		// The overlay renders this through the ingestion's dialog-request
-		// list; the desktop has no container for it and uses the navigator
-		// door instead. Both observed.
-		opened = appid === 0 ? openPlaytimeDialog(0) : openDialogInOverlay(appid, 'requestplaytime');
-	} else {
-		dlog(`click-bridge: unbridgeable action ${route}`);
-		return;
-	}
-	if (!opened) dlog(`click-bridge: ${surface} door failed`);
-}
-
-function desktopClick(route: string): void {
-	if (route.startsWith('action:')) {
-		afterMainWindow(() => runActionToken(0, route));
-		return;
-	}
-	// Navigate once the window exists; a freshly created one needs its settle
-	// before the URL executor can land a page change in it.
-	afterMainWindow(() => {
-		try {
-			const sc: any = Reflect.get(globalThis, 'SteamClient');
-			dlog(`click-bridge: desktop ${route}`);
-			sc?.URL?.ExecuteSteamURL?.(route);
-		} catch (e) {
-			dlog(`click-bridge: navigate failed: ${(e as Error)?.message ?? e}`);
-		}
-	});
-}
 
 export function armClickBridge(): void {
 	armedUntil = Date.now() + ARM_WINDOW_MS;
@@ -200,62 +65,13 @@ export function armClickBridge(): void {
 				return;
 			}
 			dlog(`click-bridge: ${route}`);
-			const appid = await runningOverlayAppId();
-			const focused = appid !== null && overlayFocusedAppId() === appid;
-
-			// Chat picks its surface explicitly on BOTH sides: the external
-			// friends/message URL lets the client choose, and it chooses the
-			// overlay whenever a game is running, focused or not. The same
-			// ingestion case with appid 0 resolves the desktop instance.
-			if (route.startsWith('steam://friends/message/')) {
-				const sid = route.slice('steam://friends/message/'.length);
-				if (focused) {
-					if (!openChatInOverlay(appid!, sid)) dlog('click-bridge: overlay door failed');
-				} else if (appid !== null) {
-					// Game running but unfocused: the desktop instance,
-					// explicitly (the URL handler would pick the overlay).
-					afterMainWindow(() => {
-						if (!openChatOnDesktop(sid)) dlog('click-bridge: desktop chat door failed');
-					});
-				} else {
-					// No game at all: the URL handler is the proven desktop
-					// path.
-					desktopClick(route);
-				}
-				return;
-			}
-
-			// Steam placed this toast in the overlay context, but its placement
-			// can lag focus changes; re-check at click time. If the game is not
-			// actually focused now (or quit), the click behaves like a desktop
-			// one -- what Steam's own desktop-context toast click does.
-			if (!focused) {
-				desktopClick(route);
-				return;
-			}
-			if (route.startsWith('action:')) {
-				runActionToken(appid, route);
-				return;
-			}
-			let opened: boolean;
-			if (route.startsWith(OPENURL_PREFIX)) {
-				opened = openInOverlay(appid, route.slice(OPENURL_PREFIX.length));
-			} else if (route.startsWith('steam://settings/')) {
-				// The ingestion's "settings" dialog IS Settings("System").
-				// Steam's own in-game clicks land on Settings for both
-				// SystemUpdate and HardwareUpdate (observed 2026-08-29), so
-				// both settings routes map here.
-				opened = openDialogInOverlay(appid, 'settings');
-			} else if (route.startsWith('steam://nav/')) {
-				// Inert by design: Steam's own in-game click for nav routes
-				// does nothing (observed for DownloadCompleted).
-				dlog(`click-bridge: inert in-game, mirrors Steam: ${route}`);
-				return;
-			} else {
+			if (!route.startsWith(REPLAY_CLICK_PREFIX)) {
 				dlog(`click-bridge: unbridgeable route ${route}`);
 				return;
 			}
-			if (!opened) dlog('click-bridge: overlay door failed');
+			if (!invokeReplayHandler(route.slice(REPLAY_CLICK_PREFIX.length))) {
+				dlog('click-bridge: replay did not run');
+			}
 		} catch (e) {
 			dlog(`click-bridge failed: ${(e as Error)?.message ?? e}`);
 		}

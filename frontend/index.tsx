@@ -1,16 +1,12 @@
 import { callable, definePlugin, IconsModule } from 'millennium';
 import { typeName } from './generated/notifications';
-import { clientOverlayAction, clientRoute, serverRoute } from './routes';
-import { notificationFromToast, takeToastBrowserInfo, type DecodedNotification } from './notification';
-import { setIdentity } from './identity';
-import { loadUrlTemplates } from './urlstore';
+import { notificationFromToast } from './notification';
 import { dlog, safeJson } from './log';
-import { armClickBridge } from './clickbridge';
-import { rememberToastContext, trackOverlayFocus } from './overlay';
+import { armClickBridge, REPLAY_CLICK_PREFIX } from './clickbridge';
 import { startDevFirePoll } from './devfire';
 import { stashReplayCandidates } from './replay';
 import { SettingsPanel } from './Settings';
-import { loadSettings, parseCallableJson, settings } from './settings';
+import { loadSettings, settings } from './settings';
 
 /**
  * Steam draws every notification as its own CEF popup window, named
@@ -19,9 +15,10 @@ import { loadSettings, parseCallableJson, settings } from './settings';
  * has to live in here, where the document is reachable.
  *
  * This file owns the popup lifecycle: hook the popup manager, wait for a toast
- * to paint, deliver it once, close it if asked. What the toast means lives
- * elsewhere -- notification.ts decodes Steam's attached object, routes.ts turns
- * it into a steam:// route.
+ * to paint, deliver it once, close it if asked. What a click does lives
+ * elsewhere -- replay.ts stashes Steam's own click handler from the toast's
+ * tree, and the click bridge re-runs it; notification.ts decodes Steam's
+ * attached object for the log line.
  *
  * `g_PopupManager` is not public API. It is what the shipping
  * kitsune-notifications plugin uses to find the same windows, which is the only
@@ -50,7 +47,6 @@ const TOAST_PREFIX = 'notificationtoasts_';
  * single JSON string has no ordering to get wrong.
  */
 const notify = callable<[{ payload: string }], string>('Notify');
-const identity = callable<[], string>('Identity');
 
 /**
  * The popup window exists before it has painted, so a single settle delay is a
@@ -66,16 +62,6 @@ const MANAGER_RETRY_LIMIT = 60; // ~30s, covers a cold Steam start
 /** Toast names already sent, so a re-fired callback cannot double-notify. */
 const delivered = new Set<string>();
 const registrations: Registration[] = [];
-
-/** Route the way Steam would; the rules and their citations live in routes.ts. */
-function routeFor(n: DecodedNotification): string | null {
-	switch (n.source) {
-		case 'client':
-			return clientRoute(n.type, n.fields);
-		case 'server':
-			return serverRoute(n.server);
-	}
-}
 
 // --------------------------------------------------------------------------
 // toast capture
@@ -161,21 +147,19 @@ function deliverToast(win: Window, name: string, text: string): void {
 	// names (notificationtoasts_uid<appid>-...) mean the game was focused,
 	// _desktop names mean it was not -- even with a game running.
 	const overlayCtx = name.startsWith('notificationtoasts_uid');
-	// The walk also surfaces the toast's per-surface browserInfo, which the
-	// chat dialogs key on; stash it for the click bridge (overlay.ts).
-	rememberToastContext(overlayCtx, takeToastBrowserInfo());
-	// Experiment probe (docs/experiments/click-replay.md): stash the toast's
-	// own click handler before the popup can be closed. Never throws.
-	stashReplayCandidates(win, name);
+	// Stash Steam's own click handler before the popup can be closed; the
+	// click bridge replays it by toast name (replay.ts). A toast with no
+	// handler gets an unclickable notification -- the mirror of a Steam toast
+	// whose click does nothing.
+	const stashed = stashReplayCandidates(win, name);
+	const route = stashed ? `${REPLAY_CLICK_PREFIX}${name}` : null;
 
-	let route: string | null = null;
-	let ingame: string | null = null;
+	// The decode no longer routes anything; it feeds the from-toast log line,
+	// which is what tools/capture and every diagnosis in this repo read.
 	let kind: string | undefined;
 	try {
 		if (fromToast) {
 			kind = typeName(fromToast.type);
-			route = routeFor(fromToast);
-			if (fromToast.source === 'client') ingame = clientOverlayAction(fromToast.type, fromToast.fields);
 			const detail =
 				fromToast.source === 'server'
 					? `server type=${fromToast.server.type} url=${fromToast.server.url ?? ''} body=${safeJson(fromToast.server.body)}`
@@ -184,8 +168,6 @@ function deliverToast(win: Window, name: string, text: string): void {
 		}
 	} catch (e) {
 		dlog(`from-toast ${name} failed: ${(e as Error)?.message ?? e}`);
-		route = null;
-		ingame = null;
 	}
 	// An overlay-context toast is one Steam already showed inside the focused
 	// game. With nativeToastInGame on, that toast is the notification: nothing
@@ -194,10 +176,13 @@ function deliverToast(win: Window, name: string, text: string): void {
 	// the observability contract are unchanged.
 	const suppressed = overlayCtx && settings().nativeToastInGame;
 	dlog(
-		`toast ${name} -> ${safeJson({ title, body, image, kind, route, ingame })}` +
+		`toast ${name} -> ${safeJson({ title, body, image, kind, route })}` +
 			(suppressed ? ' (suppressed: native in-game)' : ''),
 	);
-	if (!suppressed) void notify({ payload: safeJson({ title, body, image, route, ingame }) });
+	// The backend/notify-action contract is unchanged (five positional args);
+	// the replay token travels in the route slot and comes back through the
+	// click file verbatim, so neither end needed to learn about replay.
+	if (!suppressed) void notify({ payload: safeJson({ title, body, image, route, ingame: null }) });
 
 	// notify-action delivers every click back through a file; arm the bridge
 	// that picks it up and chooses the surface by live focus (clickbridge.ts).
@@ -273,22 +258,9 @@ function pluginIcon(): any {
 	return null;
 }
 
-async function loadIdentity(): Promise<void> {
-	try {
-		const parsed = parseCallableJson<{ steamid64?: string }>(await identity(), {});
-		const id = setIdentity(parsed?.steamid64);
-		dlog(`identity: steamid64=${id ?? '(none)'}`);
-	} catch (e) {
-		dlog(`identity failed: ${(e as Error)?.message ?? e}`);
-	}
-}
-
 export default definePlugin(() => {
 	void loadSettings();
-	void loadIdentity();
-	void loadUrlTemplates().then((summary) => dlog(`url templates: ${summary}`));
 	installHook();
-	trackOverlayFocus();
 	startDevFirePoll();
 
 	return {

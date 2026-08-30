@@ -10,17 +10,18 @@ analysis of Steam's own click routing that every route cites;
 
 ## State
 
-Routing is built on Steam's own click logic, read out of the shipped UI bundle
-(31 of 62 types route as URLs; five more act through the click bridge's dialog
-doors; the rest are inert in Steam itself). Every click is executed from
-inside the client: notify-action writes the click to
-`~/.cache/steam-native-notify/.click`, the click bridge consumes it and picks
-the surface by live game focus — overlay doors for the focused game, desktop
-doors (raising or creating the main window) otherwise. Every type whose Steam
-click acts has a working mirror on every surface, verified live (in-game,
-desktop with the game unfocused, tray-only, no game). What remains is the
-"Still open" list in the handoff: unexercised server-type fires, the
-tray-only dialog doors, a real Comment url, the daemon matrix.
+**This branch (`feature/replay-click-path`) replaces the routing catalog with
+handler replay**, built out for a field comparison against main. At capture
+time frontend/replay.ts walks the toast's fiber tree and stashes the toast
+component's own onClick/onActivate (outermost, portal-bounded); a click writes
+`replay:<toast-name>` to `~/.cache/steam-native-notify/.click` and the click
+bridge invokes the stashed handler — Steam's own click, verbatim. routes.ts,
+urlstore.ts, identity.ts, overlay.ts and the doors are REMOVED here; main
+still has them. Known limit, measured in docs/experiments/click-replay.md:
+the handler is frozen to the surface the toast rendered on — one captured
+in-game and clicked after the game exits (or unfocused) silently no-ops where
+main routes to the desktop. The stash holds the latest 8 toasts for 120s;
+clicks past that (or after a Steam restart) do nothing.
 
 ## Commands
 
@@ -28,17 +29,18 @@ tray-only dialog doors, a real Comment url, the daemon matrix.
 bun run build          # generate proto types, type-check, pack + install the .star
 bun run typecheck      # tsc --noEmit on its own
 bun run test           # tools/test-backend (Lua, Millennium stubbed)
-                       # + tools/test-routes (offline route/decode checks)
+                       # + tools/test-routes (offline decode checks; the
+                       #   route tests left with the catalog on this branch)
 tools/capture          # is the running .star current, did the hook attach,
                        # what did the last notifications carry
 tools/fire TestFriendOnline   # push a real test toast through Steam's pipeline
                               # (needs the tools/fire toggle in plugin settings)
 tools/fire --server 3 '{...}' # inject a server rollup through OnServerNotification
 tools/mep --methods    # talk to Millennium's external protocol (dev only)
+tools/fire --replay inspect   # dump the stashed handler candidates
+tools/fire --replay invoke    # invoke the latest stashed handler (no click)
 tools/notify-action --resolve-icon <url>
 bun run proto:check    # has Steam's protobuf drifted from vendor/
-bun run gen:table      # regenerate docs/notification-types.md; FAILS when the
-                       # catalog prose disagrees with what routes.ts does
 ```
 
 Install: `bun install`, then `bun run build`; starlight packs the plugin into
@@ -50,9 +52,9 @@ backend load (Millennium buffers a packed plugin's logger output away from
 Steam's console log, so the backend mirrors it there). Millennium's own
 loader lines are still in `~/.steam/steam/logs/console-linux.txt`, filtered
 by `me.tysmith.steam-native-notify`. Click triage reads the same log:
-`click-bridge:` lines show every consumed click and the chosen surface,
-`overlay:` lines show each door opening. The full vocabulary is in the
-handoff ("The click architecture").
+`replay: candidates` shows what each toast stashed, `click-bridge:` every
+consumed click, `replay: invoke` what running the handler did (a throw is
+logged verbatim, never propagated).
 
 ## Hard constraints
 
@@ -139,13 +141,10 @@ regexes silently dropped edits and deleted a live declaration twice.
 ```
 millennium.toml           plugin manifest; starlight packs everything below
 frontend/index.tsx        popup lifecycle: hook, wait, deliver   (Steam's CEF)
-frontend/notification.ts  React tree -> typed notification
-frontend/routes.ts        the routing catalog, cites steam-routing.md
-frontend/urlstore.ts      Steam's URL templates (GetSteamURLList)
-frontend/identity.ts      signed-in steamid64, from the backend
+frontend/notification.ts  React tree -> typed notification (feeds the log)
+frontend/replay.ts        stash Steam's own click handler per toast; invoke it
 frontend/log.ts           dlog/safeJson; prefixes are capture's contract
-frontend/overlay.ts       the surface doors: overlay/desktop dialogs, focus
-frontend/clickbridge.ts   every click: .click file -> surface by live focus
+frontend/clickbridge.ts   every click: .click file -> replay by toast name
 frontend/devfire.ts       tools/fire door, gated by a setting
 frontend/Settings.tsx     settings panel; settings.ts, one JSON document
 frontend/generated/       generated from vendor/*.proto, do not edit
