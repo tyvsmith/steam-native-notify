@@ -196,6 +196,14 @@ stored.hideSteamToast = true
 ok, loaded = pcall(LoadSettings)
 check("LoadSettings migrates the old key", ok and type(loaded) == "string" and loaded:find('"hideSteamToast":true', 1, true) ~= nil, tostring(loaded))
 
+-- A fresh install has neither a settings document nor the legacy key. The
+-- fallback must be an EMPTY document: any explicit key here would override
+-- the frontend's DEFAULTS merge (hideSteamToast ships on).
+stored.settings = nil
+stored.hideSteamToast = nil
+ok, loaded = pcall(LoadSettings)
+check("LoadSettings on a fresh install yields an empty document", ok and loaded == "{}", tostring(loaded))
+
 -- Identity: shape only. The steamid comes from the machine's loginusers.vdf,
 -- which this test does not fabricate; present it must be a steamid64, absent
 -- the object is simply empty and the frontend routes without one.

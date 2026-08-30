@@ -47,9 +47,11 @@ Two toggles, both on by default:
   game has focus, alongside Steam's in-game toast. Off keeps in-game
   notifications inside Steam only.
 
-Developer toggles (hide Steam's own toasts; accept `tools/fire` test
-commands) exist but stay hidden unless `devMode` is set in the stored
-settings document — there is deliberately no UI for it (see
+Steam's own toast is hidden once its text has been read — the native
+notification replaces it rather than duplicating it. That and the
+`tools/fire` test-command door are developer toggles (`hideSteamToast`,
+on by default; `devFire`, off), hidden unless `devMode` is set in the
+stored settings document — there is deliberately no UI for it (see
 `docs/architecture.md`, testing methodology).
 
 ## Diagnosing

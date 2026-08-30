@@ -19,7 +19,10 @@ export interface Settings {
 	 * in-game notifications stay Steam's alone.
 	 */
 	notifyInGame: boolean;
-	/** Dev: close Steam's own toast once its text has been read. */
+	/**
+	 * Dev: close Steam's own toast once its text has been read. Ships ON --
+	 * the native notification replaces Steam's rather than duplicating it.
+	 */
 	hideSteamToast: boolean;
 	/**
 	 * Dev: accept commands from tools/fire (devfire.ts). A name-and-args door
@@ -39,7 +42,7 @@ export interface Settings {
 const DEFAULTS: Settings = {
 	notifyOutsideGame: true,
 	notifyInGame: true,
-	hideSteamToast: false,
+	hideSteamToast: true,
 	devFire: false,
 	devMode: false,
 };

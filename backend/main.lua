@@ -112,7 +112,11 @@ local SETTINGS_KEY = "settings"
 function LoadSettings()
     local stored = millennium.config.get(SETTINGS_KEY)
     if type(stored) == "string" and stored ~= "" then return stored end
-    return json.encode({ hideSteamToast = millennium.config.get("hideSteamToast") == true })
+    -- Only a legacy value may appear here: an explicit key in this fallback
+    -- would override the frontend's DEFAULTS merge on a fresh install.
+    local legacy = millennium.config.get("hideSteamToast")
+    if legacy ~= nil then return json.encode({ hideSteamToast = legacy == true }) end
+    return "{}"
 end
 
 ---@ffi
