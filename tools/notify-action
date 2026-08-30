@@ -108,8 +108,11 @@ resolve_icon() {
 
 	mkdir -p "$CACHE" 2>/dev/null || { echo steam; return; }
 	# Download to a temp name and rename, so an interrupted fetch cannot leave a
-	# truncated icon cached forever.
-	if curl -fsSL --max-time 5 -o "$cached.part" "$raw" 2>/dev/null && [ -s "$cached.part" ]; then
+	# truncated icon cached forever. Spawned from inside Steam, the runtime's
+	# LD_LIBRARY_PATH pins an old libcurl.so.4 that the system curl binary
+	# refuses (CURL_OPENSSL_4 not found, verified 2026-08-30), so curl runs
+	# with the loader vars cleared.
+	if env -u LD_LIBRARY_PATH -u LD_PRELOAD curl -fsSL --max-time 5 -o "$cached.part" "$raw" 2>/dev/null && [ -s "$cached.part" ]; then
 		mv -f "$cached.part" "$cached"
 		echo "$cached"
 	else
