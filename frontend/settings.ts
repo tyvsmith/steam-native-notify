@@ -70,20 +70,33 @@ export function parseCallableJson<T>(raw: unknown, fallback: T): T {
 	}
 }
 
+/**
+ * Retried: a one-shot load once raced a slow backend at Steam start and
+ * silently ran the whole session on DEFAULTS (observed 2026-08-29 -- the
+ * devFire poll stayed dead with the toggle stored on). The backend's
+ * LoadSettings always returns a parseable document, so anything else is a
+ * not-ready backend, worth another try.
+ */
 export async function loadSettings(): Promise<Settings> {
-	try {
-		const stored = parseCallableJson<Partial<Settings> & { nativeToastInGame?: boolean }>(
-			await loadSettingsRaw(),
-			{},
-		);
-		// One retired key: nativeToastInGame=true meant "no desktop delivery
-		// while a game has focus", which is notifyInGame=false today.
-		if (typeof stored?.nativeToastInGame === 'boolean' && typeof stored.notifyInGame !== 'boolean') {
-			stored.notifyInGame = !stored.nativeToastInGame;
+	for (let attempt = 0; attempt < 15; attempt++) {
+		try {
+			const stored = parseCallableJson<(Partial<Settings> & { nativeToastInGame?: boolean }) | null>(
+				await loadSettingsRaw(),
+				null,
+			);
+			if (stored && typeof stored === 'object') {
+				// One retired key: nativeToastInGame=true meant "no desktop
+				// delivery while a game has focus" -- notifyInGame=false today.
+				if (typeof stored.nativeToastInGame === 'boolean' && typeof stored.notifyInGame !== 'boolean') {
+					stored.notifyInGame = !stored.nativeToastInGame;
+				}
+				current = { ...DEFAULTS, ...stored };
+				return current;
+			}
+		} catch {
+			/* backend not up yet; retry below */
 		}
-		current = { ...DEFAULTS, ...stored };
-	} catch {
-		current = { ...DEFAULTS };
+		await new Promise((resolve) => setTimeout(resolve, 1000));
 	}
 	return current;
 }
