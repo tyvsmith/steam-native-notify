@@ -1,6 +1,6 @@
 import { callable } from 'millennium';
 import { dlog } from './log';
-import { invokeReplayHandler } from './replay';
+import { CLICK_WINDOW_MS, invokeReplayHandler } from './replay';
 
 /**
  * The click bridge: every notification click is delivered through here.
@@ -13,16 +13,17 @@ import { invokeReplayHandler } from './replay';
  * catalog. Known limit (docs/experiments/click-replay.md): the handler is
  * frozen to the surface the toast rendered on.
  *
- * The poll is armed by deliverToast for ARM_WINDOW_MS after each delivery and
- * stops itself afterwards, so an idle session polls nothing.
+ * The poll is armed by deliverToast for CLICK_WINDOW_MS after each delivery
+ * and stops itself afterwards, so an idle session polls nothing.
  */
 const takeClick = callable<[], string>('TakeClick');
 
 const CLICK_POLL_MS = 1000;
-export const ARM_WINDOW_MS = 120_000;
 /**
  * notify-action stamps each click with its write time (<epoch-seconds>|
- * <payload>). The poll only runs while armed, so a click written after the
+ * <payload>). The poll only runs while armed (CLICK_WINDOW_MS after each
+ * delivery -- the same constant that bounds the handler stash, so a click
+ * the poll consumes always finds its handler), and a click written after the
  * disarm would sit in the file and fire as a surprise on the NEXT arm, up to
  * days later; anything older than this is dropped instead of opened.
  */
@@ -35,7 +36,7 @@ let armedUntil = 0;
 let timer: number | null = null;
 
 export function armClickBridge(): void {
-	armedUntil = Date.now() + ARM_WINDOW_MS;
+	armedUntil = Date.now() + CLICK_WINDOW_MS;
 	if (timer !== null) return;
 	timer = window.setInterval(async () => {
 		if (Date.now() > armedUntil) {

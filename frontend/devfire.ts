@@ -123,13 +123,10 @@ export function startDevFirePoll(): void {
 				return;
 			}
 			// Replay diagnostics: inspect the handler stash, or invoke a stashed
-			// handler without a desktop click. invoke-bare runs the outermost
-			// candidate instead of the DOM click, reproducing the toast-slot
-			// leak the DOM-click choice exists to avoid. None of these throw.
+			// handler without a desktop click. Neither throws.
 			if (cmd.replay) {
 				if (cmd.replay.call === 'inspect') inspectReplayStash();
 				else if (cmd.replay.call === 'invoke') invokeReplayHandler(cmd.replay.name);
-				else if (cmd.replay.call === 'invoke-bare') invokeReplayHandler(cmd.replay.name, true);
 				else dlog(`replay: unknown call ${String(cmd.replay.call)}`);
 				return;
 			}
