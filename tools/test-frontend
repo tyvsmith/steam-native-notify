@@ -8,6 +8,10 @@
 // offline-testable is notificationFromToast, which feeds the from-toast log
 // line that every diagnosis in this repo reads.
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { loadFrontendModules } from './load-frontend.mjs';
 
 const mods = loadFrontendModules(['notification', 'choose']);
@@ -24,6 +28,20 @@ function check(what, ok, detail) {
 }
 function is(what, got, want) {
 	check(what, Object.is(got, want), `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+}
+
+// --- millennium-free boundary ----------------------------------------------
+
+// The core modules must never import 'millennium' directly: that boundary is
+// what keeps them compilable here without Steam and portable to a
+// non-Millennium host (docs/architecture.md). Indirect imports like './log'
+// are fine; only a direct 'millennium' import breaks the boundary.
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+for (const name of ['choose', 'fiber', 'notification', 'replay']) {
+	const source = readFileSync(join(root, 'frontend', `${name}.ts`), 'utf8');
+	check(`frontend/${name}.ts stays free of direct millennium imports`,
+		!/from\s+['"]millennium['"]|require\(\s*['"]millennium['"]\s*\)/.test(source),
+		`frontend/${name}.ts imports 'millennium'; the offline-test boundary forbids that`);
 }
 
 // --- notificationFromToast -------------------------------------------------
