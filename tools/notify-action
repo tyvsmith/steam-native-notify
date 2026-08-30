@@ -170,6 +170,18 @@ if daemon_parses_markup; then
 	body=$(escape_markup "$body")
 fi
 
+# A file-backed icon rides the image-path hint as a file:// reference, with -i
+# left as the themed fallback. Through -i, notify-send sends a path as
+# image-data pixels, which the daemon keeps only in-process: the live popup
+# renders them, but a history row has nothing left to show (verified against
+# quickshell's persisted state, 2026-08-30). A file reference the daemon can
+# copy survives -- and image-data beats image-path, so the path must not ALSO
+# ride -i.
+case $icon in
+/*) set -- -i steam -h "string:image-path:file://$icon" ;;
+*) set -- -i "$icon" ;;
+esac
+
 # Blocks here. On a click the action name is printed; on dismissal, nothing is.
 #
 # The daemon can be briefly absent -- at login the backend can deliver before
@@ -178,7 +190,7 @@ fi
 # silently then, so retry for ~30s rather than lose the notification; a
 # machine with no daemon at all gives up quietly.
 tries=0
-until chosen=$(notify-send -a "$APP_NAME" -i "$icon" -t "$EXPIRE" \
+until chosen=$(notify-send -a "$APP_NAME" "$@" -t "$EXPIRE" \
 	-A "$ACTION=Open" "$title" "$body" 2>/dev/null); do
 	# Retry ONLY while the daemon is absent. A failure with the daemon
 	# reachable is something else (it may even have fired after the toast

@@ -359,6 +359,39 @@ check("caps: plain-text daemon gets the raw body",
 check("caps: unreachable daemon defaults to escaped",
 	delivered_body([[exit 1]]) == "a &lt; b &amp; c")
 
+-- A file-backed icon must travel as an image-path hint (a file:// reference),
+-- with -i carrying only the themed fallback: a path through -i becomes
+-- image-data pixels, which die with the popup and leave history rows
+-- iconless. notify-send is shimmed to dump its arguments.
+local iconargs_h = io.popen("mktemp -d")
+local iconargs_dir = iconargs_h:read("*l")
+iconargs_h:close()
+if iconargs_dir and iconargs_dir ~= "" then
+	io.popen("printf 'x' > '" .. iconargs_dir .. "/avatar.jpg'"):close()
+	local ns = assert(io.open(iconargs_dir .. "/notify-send", "w"))
+	ns:write(([[#!/bin/sh
+printf '%%s\n' "$@" > %s/args
+exit 0
+]]):format(iconargs_dir))
+	ns:close()
+	io.popen("chmod +x '" .. iconargs_dir .. "/notify-send'"):close()
+	io.popen("PATH='" .. iconargs_dir .. "':\"$PATH\" " .. root
+		.. "/tools/notify-action 'T' 'b' '" .. iconargs_dir .. "/avatar.jpg' ''; echo done"):read("*a")
+	local af = io.open(iconargs_dir .. "/args", "r")
+	local sent_args = af and af:read("*a") or "(no args)"
+	if af then af:close() end
+	check("file icon rides the image-path hint",
+		sent_args:find("string:image-path:file://" .. iconargs_dir .. "/avatar.jpg", 1, true) ~= nil,
+		sent_args)
+	check("file icon leaves -i as the themed fallback",
+		sent_args:find("-i\nsteam\n", 1, true) ~= nil
+			and sent_args:find("-i\n" .. iconargs_dir, 1, true) == nil,
+		sent_args)
+	io.popen("rm -rf '" .. iconargs_dir .. "'"):close()
+else
+	print("  skip icon-args (mktemp failed)")
+end
+
 -- A clicked route is written to the click file stamped with the write time
 -- (<epoch-seconds>|<payload>), so the bridge can drop a click that outlived
 -- its arm window. notify-send is shimmed to report the click.
