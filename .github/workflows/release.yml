@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and check the version; publish nothing
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      upload: true
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v8
+        with:
+          name: me.tysmith.steam-native-notify.star
+          path: dist
+
+      # The tag names the release; millennium.toml is the version the bundle
+      # reports to Millennium. They must agree or users install a .star that
+      # claims a different version than the release it came from.
+      - name: Check the tag against millennium.toml
+        id: version
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          test -f dist/me.tysmith.steam-native-notify.star || { echo "artifact missing"; ls -R dist; exit 1; }
+          manifest=$(awk -F'"' '/^\[/{s=$0} s=="[plugin]" && /^version *=/{print $2}' millennium.toml)
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag=$GITHUB_REF_NAME
+          elif [ "$DRY_RUN" = true ]; then
+            tag=v$manifest
+            echo "dry run from $GITHUB_REF_NAME: standing in for tag $tag"
+          else
+            echo "not a tag ref ($GITHUB_REF): dispatch from a v* tag, or with dry_run"; exit 1
+          fi
+          test "$tag" = "v$manifest" || { echo "tag $tag != millennium.toml version $manifest"; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      # A tag with a semver prerelease suffix (v1.2.0-rc1) publishes as a prerelease.
+      - name: Create the GitHub release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          case $TAG in *-*) pre=--prerelease ;; *) pre= ;; esac
+          gh release create "$TAG" dist/me.tysmith.steam-native-notify.star \
+            --verify-tag --generate-notes $pre
