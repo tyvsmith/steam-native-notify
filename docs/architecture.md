@@ -143,9 +143,15 @@ action.
 - Notification actions must be named `default` to fire on a body click, and
   only while the popup is live, hence `-t 0`. The daemon does not auto-fire
   actions on expiry, so a logged click is a genuine click.
-- Millennium callables take exactly ONE argument, a JSON string (key order is
-  not preserved onto Lua parameter names), and return values arrive
-  JSON-encoded — a Lua string comes back wrapped in literal quotes.
+- Frontend-backend RPC rides Millennium's `ffi` bridge with positional
+  arguments (`Notify(title, body, image, route, ingame)`); the retired
+  `callable` transport could not order a multi-key object. A Lua string return
+  has arrived both raw and JSON-quoted across transports — unwrap only what
+  starts with a quote.
+- Settings are per-key values in Millennium's config store (`usePluginConfig`
+  in the panel, `pluginConfig`/`subscribePluginConfig` behind `settings()`);
+  the backend migrates the earlier one-document form at load, and a config
+  write from any source pushes to the running frontend (verified 2026-08-30).
 
 ## Testing methodology, which is easy to get wrong
 

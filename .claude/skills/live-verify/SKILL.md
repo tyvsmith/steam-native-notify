@@ -61,21 +61,21 @@ Preset it externally (needs Steam running for the socket; `tools/mep` needs
 python3-msgpack):
 
 ```sh
-tools/mep plugin.config.get name=me.tysmith.steam-native-notify key=settings   # read current first
-tools/mep plugin.config.set name=me.tysmith.steam-native-notify key=settings \
-  value='"{\"notifyOutsideGame\":true,\"notifyInGame\":true,\"hideSteamToast\":false,\"devFire\":true,\"devMode\":true}"'
+tools/mep plugin.config.get name=me.tysmith.steam-native-notify key=devFire   # read current first
+tools/mep plugin.config.set name=me.tysmith.steam-native-notify key=devMode value=true
+tools/mep plugin.config.set name=me.tysmith.steam-native-notify key=devFire value=true
 ```
 
-With Steam stopped, the same document can be seeded directly in
+With Steam stopped, seed the same per-key values directly in
 `~/.config/millennium/config.json` under
-`plugins."me.tysmith.steam-native-notify".config.settings` (a JSON string).
+`plugins."me.tysmith.steam-native-notify".config` (`"devFire": true`,
+`"devMode": true`).
 
-- The value must arrive as a JSON-encoded **string** (the whole settings
-  document). mep parses values as JSON, so a bare `{...}` arrives as a map and
-  `LoadSettings` silently falls back to defaults.
-- MEP config writes never reach a running frontend (verified dead end): the
-  preset takes effect at the next frontend load, i.e. the next Steam restart.
-- The write replaces the whole document — carry every key.
+- Settings are per-key booleans in Millennium's config store (the earlier
+  one-document form migrates at backend load). mep parses values as JSON, so
+  `value=true` arrives as a boolean.
+- A config write pushes to the running frontend: a mep write of `devFire`
+  gates the poll within a tick, no restart (verified 2026-08-30).
 - `devMode` gates the developer toggles in the panel (there is deliberately
   no UI for it); `devFire` gates the poll itself.
 - `notifyInGame` OFF suppresses desktop delivery for overlay-context toasts:

@@ -51,7 +51,7 @@ Steam's own toast is hidden once its text has been read — the native
 notification replaces it rather than duplicating it. That and the
 `tools/fire` test-command door are developer toggles (`hideSteamToast`,
 on by default; `devFire`, off), hidden unless `devMode` is set in the
-stored settings document — there is deliberately no UI for it (see
+plugin's stored settings — there is deliberately no UI for it (see
 `docs/architecture.md`, testing methodology).
 
 ## Diagnosing

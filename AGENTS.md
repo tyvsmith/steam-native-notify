@@ -40,8 +40,8 @@ tools/capture          # is the running .star current, did the hook attach,
 tools/fire TestFriendOnline   # push a real test toast through Steam's pipeline
                               # (needs the devFire toggle; the developer toggles
                               #  only appear in the panel with devMode set in
-                              #  the settings document -- seed it via tools/mep
-                              #  or the Millennium config, see live-verify)
+                              #  Millennium's config store -- seed it via
+                              #  tools/mep or the config file, see live-verify)
 tools/fire --server 3 '{...}' # inject a server rollup through OnServerNotification
 tools/mep --methods    # talk to Millennium's external protocol (dev only)
 tools/fire --replay inspect   # dump the stashed handler candidates
@@ -96,9 +96,18 @@ BigInt silently killed every notification. Use `safeJson`; keep `dlog` wrapped.
 The log prefixes in `frontend/log.ts` are the contract `tools/capture` greps;
 renaming one blinds the triage tool.
 
-**Millennium callables take exactly one argument, a JSON string.** Key order is
-not preserved onto Lua parameter names. Return values arrive JSON-encoded, so a
-Lua string comes back wrapped in literal quote characters.
+**Frontend-backend RPC is Millennium's `ffi` bridge, positional.**
+`ffi('Notify')(title, body, image, route, ingame)` lands on the Lua parameters
+in order (the old `callable` transport could not order a multi-key object,
+which is why everything once travelled as one JSON string). A Lua string
+return has arrived both raw and JSON-quoted across transports: unwrap only
+what provably starts with a quote (clickbridge.ts).
+
+**Settings live per-key in Millennium's config store.** The panel uses
+`usePluginConfig`; the `settings()` snapshot loads via `pluginConfig.getAll`
+and stays current through `subscribePluginConfig`; the backend migrates the
+old one-document form at load. A write from any source (panel, backend,
+`tools/mep`) reaches a running frontend without a restart.
 
 ## Testing notifications
 
