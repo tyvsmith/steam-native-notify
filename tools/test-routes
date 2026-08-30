@@ -10,8 +10,8 @@
 
 import { loadFrontendModules } from './load-frontend.mjs';
 
-const mods = loadFrontendModules(['notification', 'generated/notifications']);
-const { notification } = mods;
+const mods = loadFrontendModules(['notification', 'choose', 'generated/notifications']);
+const { notification, choose } = mods;
 const schema = mods['generated/notifications'];
 
 let failures = 0;
@@ -82,6 +82,50 @@ check('notification found up the fiber.return chain',
 	deep?.source === 'client' && deep.fields.appid === 570, JSON.stringify(deep));
 
 is('a window with no fiber yields null', notification.notificationFromToast(toastWindow(null)), null);
+
+// --- chooseHandler ---------------------------------------------------------
+
+// Which stashed handler a click may invoke. The fixtures mirror live dumps
+// (docs/experiments/click-replay.md): Steam drills the same function object
+// down the wrapper chain, so proof is identity, never position.
+function cand(prop, depth, fn) {
+	return { prop, depth, fn, fnName: '', snippet: '' };
+}
+const activate = () => {};
+const wrapper = () => {}; // the drilled body click: activate + dismissal
+const accept = () => {}; // an inner button: its own function, ACTS on invoke
+
+// The SystemUpdate shape: one function drilled through every level.
+const drilledSame = [cand('onActivate', 10, activate), cand('onActivate', 11, activate),
+	cand('onActivate', 12, activate), cand('onClick', 14, activate)];
+is('twin: fully drilled handler picks the DOM click',
+	choose.chooseHandler(drilledSame)?.chosen.depth, 14);
+is('twin: fully drilled handler reports twin', choose.chooseHandler(drilledSame)?.how, 'twin');
+
+// The FriendMessage shape: bare activate above, wrapper drilled to the DOM.
+const drilledWrapper = [cand('onActivate', 10, activate), cand('onActivate', 11, wrapper),
+	cand('onClick', 13, wrapper)];
+is('twin: wrapper chain picks the DOM click, not the bare activate',
+	choose.chooseHandler(drilledWrapper)?.chosen.depth, 13);
+
+// A voice-chat-like shape: an inner button deeper than the body click must
+// never win -- its function twins no onActivate.
+const withButton = [...drilledWrapper, cand('onClick', 15, accept)];
+is('twin: an inner button deeper than the body click never wins',
+	choose.chooseHandler(withButton)?.chosen.fn, wrapper);
+
+// Sole: one distinct function with no onActivate twin is unambiguous.
+is('sole: a single onClick with no activate is chosen',
+	choose.chooseHandler([cand('onClick', 5, activate)])?.how, 'sole');
+is('sole: one function at several depths picks the deepest',
+	choose.chooseHandler([cand('onClick', 5, activate), cand('onClick', 8, activate)])?.chosen.depth, 8);
+
+// Refusals: ambiguity without proof stays unclickable.
+is('refuse: distinct handlers with no twin choose nothing',
+	choose.chooseHandler([cand('onActivate', 10, activate), cand('onClick', 12, accept)]), null);
+is('refuse: an onActivate deeper than the onClick is no twin',
+	choose.chooseHandler([cand('onClick', 10, wrapper), cand('onActivate', 12, wrapper), cand('onClick', 13, accept)]), null);
+is('refuse: an empty candidate list chooses nothing', choose.chooseHandler([]), null);
 
 console.log(failures === 0 ? '\nPASS' : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

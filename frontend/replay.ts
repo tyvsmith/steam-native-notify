@@ -1,4 +1,5 @@
 import { dlog } from './log';
+import { chooseHandler, type Candidate } from './choose';
 
 /**
  * The replay click path: every notification click re-runs Steam's own click
@@ -6,27 +7,20 @@ import { dlog } from './log';
  *
  * The walk starts from the toast popup's first fiber-keyed element, climbs to
  * the popup's portal root, then traverses downward collecting every fiber
- * whose props carry a function-valued onClick or onActivate. What gets
- * stashed is the DOM-LEVEL CLICK: Steam drills the per-type activate handler
- * down a wrapper chain whose end is a DOM onClick carrying the activate PLUS
- * the toast-dismissal bookkeeping, and the drill passes the same function
- * object down -- so the DOM handler is recognised exactly, as the deepest
- * onClick that IS (===) an onActivate seen shallower in the tree. No
- * source-text heuristics. Two selection mistakes are structurally excluded:
- * an inner button (voice-chat accept) is its own function and twins nothing,
- * and the bare outermost activate -- whose invoke skips the dismissal and
- * leaked one of Steam's ~3 toast display slots per on-screen click until the
- * whole toast queue wedged (measured 2026-08-29) -- is never chosen because
- * a toast with NO identity twin is left unclickable, the mirror of a Steam
- * toast whose click does nothing.
+ * whose props carry a function-valued onClick or onActivate. Which of those
+ * a click may invoke is choose.ts's job (pure, offline-tested): the
+ * identity-proven DOM-level body click, or the sole handler when only one
+ * distinct function exists; a toast with neither proof is left unclickable,
+ * the mirror of a Steam toast whose click does nothing.
  *
  * Every `replay: candidates` line doubles as the health probe for the
  * reflective layers, in order: `n=0 (no fiber key)` means the fiber
  * convention moved; `portal=miss` means the HostPortal boundary moved;
- * `stashed=none (no dom twin)` means Steam stopped drilling the handler
- * object; a missing line entirely means the popup hook is dead. Validated
- * live 2026-08-29 (docs/experiments/click-replay.md); known limit measured
- * there: the handler is frozen to the surface its toast rendered on.
+ * `stashed=none (ambiguous)` means Steam stopped drilling the handler
+ * object and left several distinct handlers; a missing line entirely means
+ * the popup hook is dead. Validated live 2026-08-29
+ * (docs/experiments/click-replay.md); known limit measured there: the
+ * handler is frozen to the surface its toast rendered on.
  *
  * Diagnostics never throw: every property read, toString, and invoke is
  * try-wrapped, and a failed walk only costs that toast its click.
@@ -44,14 +38,6 @@ const STASH_MAX = 8;
 
 const SNIPPET_LEN = 200;
 const MAX_FIBERS = 5000;
-
-interface Candidate {
-	prop: string;
-	depth: number;
-	fn: (e: unknown) => unknown;
-	fnName: string;
-	snippet: string;
-}
 
 interface StashEntry {
 	name: string;
@@ -155,19 +141,8 @@ function collectCandidates(rootFiber: any): Candidate[] {
 	return candidates;
 }
 
-/** The deepest onClick that IS an onActivate seen shallower, or null. */
-function domTwin(candidates: Candidate[]): Candidate | null {
-	let chosen: Candidate | null = null;
-	for (const c of candidates) {
-		if (c.prop !== 'onClick') continue;
-		const twinned = candidates.some((a) => a.prop === 'onActivate' && a.depth < c.depth && a.fn === c.fn);
-		if (twinned && (!chosen || c.depth >= chosen.depth)) chosen = c;
-	}
-	return chosen;
-}
-
 /**
- * Walk the toast's tree and stash the DOM click handler under the toast
+ * Walk the toast's tree and stash the proven click handler under the toast
  * name. Called from deliverToast before the popup can be closed; never
  * throws, never blocks delivery. Returns whether a handler was stashed --
  * the notification is only made clickable when one was.
@@ -192,17 +167,19 @@ export function stashReplayCandidates(win: Window, name: string): boolean {
 
 		const { root, viaPortal } = toastSubtreeRoot(fiber, doc);
 		const candidates = collectCandidates(root);
-		const chosen = domTwin(candidates);
+		const picked = chooseHandler(candidates);
 		const health = viaPortal ? '' : ' portal=miss';
-		const summary = chosen ? `stashed=${chosen.prop}@${chosen.depth}` : 'stashed=none (no dom twin)';
+		const summary = picked
+			? `stashed=${picked.chosen.prop}@${picked.chosen.depth} (${picked.how})`
+			: 'stashed=none (ambiguous)';
 		dlog(`replay: candidates ${name} n=${candidates.length} ${summary}${health}`);
 		candidates.forEach((c, i) => {
 			dlog(`replay: candidate ${name} #${i} ${c.prop}@${c.depth} name=${c.fnName || '(anon)'} :: ${c.snippet}`);
 		});
-		if (!chosen) return false;
+		if (!picked) return false;
 
 		stash.delete(name); // re-insert so the map stays insertion-ordered by recency
-		stash.set(name, { name, stashedAt: Date.now(), fn: chosen.fn, chosen, candidates });
+		stash.set(name, { name, stashedAt: Date.now(), fn: picked.chosen.fn, chosen: picked.chosen, candidates });
 		pruneStash();
 		return true;
 	} catch (e) {

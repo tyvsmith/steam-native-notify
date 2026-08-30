@@ -143,6 +143,7 @@ millennium.toml           plugin manifest; starlight packs everything below
 frontend/index.tsx        popup lifecycle: hook, wait, deliver   (Steam's CEF)
 frontend/notification.ts  React tree -> typed notification (feeds the log)
 frontend/replay.ts        stash Steam's own click handler per toast; invoke it
+frontend/choose.ts        which handler a click may invoke (pure, offline-tested)
 frontend/log.ts           dlog/safeJson; prefixes are capture's contract
 frontend/clickbridge.ts   every click: .click file -> replay by toast name
 frontend/devfire.ts       tools/fire door, gated by a setting
