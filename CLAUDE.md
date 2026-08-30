@@ -34,8 +34,7 @@ the complete original implementation.
 bun run build          # type-check, pack + install the .star
 bun run typecheck      # tsc --noEmit on its own
 bun run test           # tools/test-backend (Lua, Millennium stubbed)
-                       # + tools/test-routes (offline decode checks; the
-                       #   route tests left with the catalog on this branch)
+                       # + tools/test-frontend (toast decode + click chooser)
 tools/capture          # is the running .star current, did the hook attach,
                        # what did the last notifications carry
 tools/fire TestFriendOnline   # push a real test toast through Steam's pipeline
@@ -83,8 +82,8 @@ so first. A stale build is indistinguishable from a broken feature.
 
 **A green build proves very little.** Five runtime failures here were undefined
 names or nil globals the bundler emitted happily. The build type-checks;
-`bun run test` covers the Lua side and the routing subgraph. Run both, then
-confirm behaviour in the running client.
+`bun run test` covers the Lua side, the toast decode, and the click chooser.
+Run both, then confirm behaviour in the running client.
 
 **Diagnostics must never throw.** A debug log calling `JSON.stringify` on a
 BigInt silently killed every notification. Use `safeJson`; keep `dlog` wrapped.
@@ -158,6 +157,7 @@ frontend/index.tsx        popup lifecycle: hook, wait, deliver   (Steam's CEF)
 frontend/notification.ts  React tree -> typed notification (feeds the log)
 frontend/replay.ts        stash Steam's own click handler per toast; invoke it
 frontend/choose.ts        which handler a click may invoke (pure, offline-tested)
+frontend/fiber.ts         the __reactFiber discovery both walkers share
 frontend/log.ts           dlog/safeJson; prefixes are capture's contract
 frontend/clickbridge.ts   every click: .click file -> replay by toast name
 frontend/devfire.ts       tools/fire door, gated by a setting

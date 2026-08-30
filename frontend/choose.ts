@@ -1,25 +1,15 @@
 /**
- * Which stashed handler a click may invoke -- the one piece of the replay
- * path that is pure logic, kept free of imports so tools/test-routes can
- * lock its behavior offline.
- *
- * Steam's real click enters through the DOM-level onClick at the end of a
- * wrapper chain that drills the SAME function object down the tree, and that
- * wrapper pairs the per-type activate with the toast-dismissal bookkeeping.
- * Invoking the bare activate without the bookkeeping leaked one of Steam's
- * ~3 toast display slots per on-screen click until no toast rendered at all
- * (measured 2026-08-29), so selection accepts only PROOF, in two forms:
- *
- * - `twin`: the deepest onClick that IS (===) an onActivate seen shallower
- *   in the tree -- the drilled body click, bookkeeping included. An inner
- *   button (voice-chat accept) is its own function and twins nothing.
- * - `sole`: every candidate is one function object, so nothing can be
- *   mis-chosen; the deepest occurrence is reported.
- *
- * Anything else -- several distinct handlers, none provably the body click
- * -- is null, and the toast stays unclickable: the mirror of a Steam toast
- * whose click does nothing, and the fail-closed end of a path whose wrong
- * invoke ACTS (a voice-chat accept answers the call).
+ * Which stashed handler a click may invoke -- pure logic, import-free so
+ * tools/test-frontend can lock it offline. Selection accepts only proof:
+ * `twin` (the deepest onClick that IS (===) an onActivate seen shallower --
+ * Steam drills the handler object down the toast's wrapper chain, and only
+ * the DOM end carries the toast-dismissal bookkeeping) or `sole` (every
+ * candidate is one function object; nothing can be mis-chosen). Anything
+ * else is null and the toast stays unclickable: a wrong invoke ACTS (a
+ * voice-chat accept answers the call), and invoking less than the DOM
+ * click leaked toast display slots until no toast rendered at all
+ * (measured 2026-08-29; docs/experiments/click-replay.md, "Build-out
+ * incidents").
  */
 
 export interface Candidate {

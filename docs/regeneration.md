@@ -93,3 +93,8 @@ branch), and re-add the decode fixtures to tools/test-routes.
   hybrid sketch.
 - `frontend/choose.ts` + its fixtures — the click chooser, the one piece of
   replay that is pure logic and offline-tested.
+- `backend/main.lua`, `tools/notify-action`, `tools/test-backend` — kept
+  byte-identical to main on purpose (the merge/rollback story). notify-
+  action's fifth positional argument and `click_plan`'s action branch are
+  inert here (the frontend always sends `ingame` null), and its header's
+  `routes.ts` citation dangles; both are known and deliberate.

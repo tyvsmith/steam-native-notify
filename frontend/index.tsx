@@ -1,9 +1,9 @@
 import { callable, definePlugin, IconsModule } from 'millennium';
 import { notificationFromToast } from './notification';
 import { dlog, safeJson } from './log';
-import { armClickBridge, REPLAY_CLICK_PREFIX } from './clickbridge';
+import { armClickBridge } from './clickbridge';
 import { startDevFirePoll } from './devfire';
-import { stashReplayCandidates } from './replay';
+import { stashToastHandler } from './replay';
 import { SettingsPanel } from './Settings';
 import { loadSettings, settings } from './settings';
 
@@ -147,11 +147,9 @@ function deliverToast(win: Window, name: string, text: string): void {
 	// _desktop names mean it was not -- even with a game running.
 	const overlayCtx = name.startsWith('notificationtoasts_uid');
 	// Stash Steam's own click handler before the popup can be closed; the
-	// click bridge replays it by toast name (replay.ts). A toast with no
-	// handler gets an unclickable notification -- the mirror of a Steam toast
-	// whose click does nothing.
-	const stashed = stashReplayCandidates(win, name);
-	const route = stashed ? `${REPLAY_CLICK_PREFIX}${name}` : null;
+	// token routes the click back to it (replay.ts). No proven handler, no
+	// token: the notification arrives unclickable, mirroring Steam.
+	const route = stashToastHandler(win, name);
 
 	// The decode no longer routes anything; it feeds the from-toast log line,
 	// which is what tools/capture and every diagnosis in this repo read.
@@ -171,12 +169,8 @@ function deliverToast(win: Window, name: string, text: string): void {
 	} catch (e) {
 		dlog(`from-toast ${name} failed: ${(e as Error)?.message ?? e}`);
 	}
-	// Delivery is gated per surface by the two user-facing toggles: desktop
-	// notifications for desktop-context toasts (notifyOutsideGame) and for
-	// overlay-context toasts (notifyInGame). A suppressed toast is left
-	// entirely to Steam -- nothing sent, popup not closed (hideSteamToast
-	// included). Capture and logs still run, so tools/capture and the
-	// observability contract are unchanged.
+	// A suppressed toast is left entirely to Steam: nothing sent, popup not
+	// closed (hideSteamToast included). Capture and the logs above still run.
 	const suppressed = overlayCtx ? !settings().notifyInGame : !settings().notifyOutsideGame;
 	dlog(
 		`toast ${name} -> ${safeJson({ title, body, image, type, route })}` +

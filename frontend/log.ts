@@ -4,10 +4,11 @@ import { callable } from 'millennium';
  * Diagnostics for the whole frontend, kept out of index so any module can log
  * without importing the capture path.
  *
- * These lines are the plugin's observability: tools/capture greps Millennium's
- * log for the prefixes `hook installed`, `url templates:`, `identity:`,
- * `from-toast `, `toast <name> -> ` and `dev-fire`. Renaming a prefix without
- * updating tools/capture blinds the triage tool.
+ * These lines are the plugin's observability: tools/capture greps the plugin
+ * log for the prefixes `hook installed`, `helper`, `from-toast `,
+ * `toast <name> -> `, `dev-fire`, `replay: candidates`, `replay: invoke` and
+ * `click-bridge`. Renaming a prefix without updating tools/capture blinds
+ * the triage tool.
  */
 const logLine = callable<[{ line: string }], string>('Log');
 

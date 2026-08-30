@@ -11,7 +11,7 @@
     "build": "tsc --noEmit && starlight pack",
     "typecheck": "tsc --noEmit",
     "prepare": "starlight lsp",
-    "test": "tools/test-backend && bun tools/test-routes"
+    "test": "tools/test-backend && bun tools/test-frontend"
   },
   "devDependencies": {
     "@steambrew/starlight": "^1.1.4",

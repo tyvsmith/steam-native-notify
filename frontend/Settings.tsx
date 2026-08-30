@@ -14,7 +14,9 @@ export function SettingsPanel() {
 	}, []);
 
 	const toggle = (key: keyof Settings) => (value: boolean) => {
-		setS({ ...s, [key]: value });
+		// Functional update: two toggles flipped in one render cycle must not
+		// lose the first to a stale closure.
+		setS((prev: Settings) => ({ ...prev, [key]: value }));
 		void updateSettings({ [key]: value });
 	};
 

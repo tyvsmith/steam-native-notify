@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
-# Fire a test notification through Steam's own toast pipeline.
+# Fire a test notification through Steam's own toast pipeline, and drive the
+# plugin's dev diagnostics. Every command writes a file the plugin's dev poll
+# consumes within ~3s, gated on the devFire developer toggle.
 #
-# Writes a command file the plugin's debug poll consumes (within ~3s); the
-# frontend calls the named method on Steam's NotificationStore, whose Test*
-# functions synthesize a real notification. See docs/steam-routing.md,
-# "Test harness", for what exists. Server-backed types (Wishlist, TradeOffer,
-# Comment...) cannot be fired this way: their test path is disabled in the
-# shipped client.
-#
-# Usage:
+# Client toasts (Steam's own NotificationStore Test* methods; args are JSON —
+# bare numbers and null pass through, quote strings):
 #   tools/fire TestDownloadComplete 1073390
 #   tools/fire TestFriendOnline
 #   tools/fire TestFriendMessage null '"Ready to play?"'
 #   tools/fire TestAchievement 570
+#   NEVER TestIncomingVoiceChat: the fake call cannot resolve and wedges
+#   Steam's toast queue until restart (CLAUDE.md).
 #
 # Server-sourced (eSource=2) types, whose shipped test methods are stubbed, go
 # through the real ingestion path instead (OnServerNotification):
 #   tools/fire --wishlist [appid]              store-bound wishlist toast
-#                                              (appid must be a known app;
-#                                               defaults to 1073390, Aircar)
+#                                              (defaults to 1073390, Aircar)
 #   tools/fire --server <type> '<body-json>'   any type; see the body_data
 #                                              fields in docs/steam-routing.md
 #
-# Arguments are JSON values (bare numbers and null pass through; quote strings).
+# Diagnostics (results land in the plugin log):
+#   tools/fire --overlay-info                dump overlay browser PIDs
+#   tools/fire --replay inspect              dump the stashed handler entries
+#   tools/fire --replay invoke [toast-name]  invoke a stashed handler
 
 set -euo pipefail
 
@@ -40,7 +40,7 @@ fi
 mkdir -p "$RUNTIME_DIR"
 
 if [[ $# -lt 1 ]]; then
-  sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit 2
 fi
 

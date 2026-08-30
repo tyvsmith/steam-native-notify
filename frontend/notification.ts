@@ -1,19 +1,16 @@
+import { firstFiber } from './fiber';
+
 /**
  * "React tree -> typed notification", in one place.
  *
  * Steam attaches its own decoded notification object to the toast's React
- * tree: `{ eType, eSource, data, ... }`. The shape of `data` depends on
- * `eSource` (docs/steam-routing.md): client-sourced (1), it is Steam's own
- * decoded protobuf message, a Closure wrapper whose values sit POSITIONALLY
- * in `array`. Server-sourced (2), it is a plain rollup object
- * `{ type, item, url }` whose `item.body_data` is a JSON string.
- *
- * On this branch the decode feeds ONLY the from-toast log line -- clicks
- * replay Steam's own handler and never read these fields -- so the client
- * payload is passed through as the raw positional array. Field names come
- * from the generated protobuf schema, which was removed with the routing
- * catalog; docs/regeneration.md says where it lives and how to bring it
- * back, and docs/notification-types.md maps the type numbers.
+ * tree: `{ eType, eSource, data, ... }`. Client-sourced (eSource 1), `data`
+ * is a Closure protobuf whose values sit POSITIONALLY in `array`;
+ * server-sourced (2), a plain rollup whose `item.body_data` is JSON
+ * (docs/steam-routing.md). The decode feeds ONLY the from-toast log line,
+ * so the client payload passes through as the raw array -- the schema that
+ * named its fields left with the catalog (docs/regeneration.md §2;
+ * docs/notification-types.md maps the type numbers).
  */
 export type DecodedNotification =
 	| { source: 'client'; type: number; raw: unknown[] }
@@ -45,18 +42,8 @@ export function notificationFromToast(win: Window): DecodedNotification | null {
 		const doc = win.document;
 		if (!doc) return null;
 
-		let node: Element | null = null;
-		let key: string | undefined;
-		for (const el of Array.from(doc.querySelectorAll('*'))) {
-			key = Object.keys(el).find((k) => k.startsWith('__reactFiber'));
-			if (key) {
-				node = el;
-				break;
-			}
-		}
-		if (!node || !key) return null;
-
-		let fiber: any = (node as any)[key];
+		let fiber: any = firstFiber(doc);
+		if (!fiber) return null;
 		for (let depth = 0; fiber && depth < 30; depth++) {
 			const props = fiber.memoizedProps ?? fiber.pendingProps;
 			const notification = props?.notification;

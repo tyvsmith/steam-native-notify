@@ -64,6 +64,30 @@ already cataloged and mirrored; replay replicated the bridge's behavior in
 every matched-surface cell and never exceeded it. The probe code stays on
 this branch as the record.
 
+### Build-out incidents (feature/replay-click-path, 2026-08-29)
+
+Two measured failures during the field build-out, both now encoded in the
+chooser (frontend/choose.ts) and its offline fixtures:
+
+- **The toast-slot leak.** The first build invoked the bare outermost
+  onActivate. Steam's real click enters through the DOM-level onClick,
+  whose wrapper pairs the activate with the toast-dismissal bookkeeping
+  (`r=>{e&&e(r),t&&t()}` in the dumps); invoking the bare activate while
+  the toast was still on screen leaked one of Steam's ~3 concurrent toast
+  display slots per click, and after three such clicks no toast of any
+  type rendered until restart. Hence twin/sole-or-refuse: the invoked
+  handler must be the identity-proven DOM click (Steam drills the same
+  function object down the wrapper chain) or the only function present.
+- **The portal sweep.** Climbing from the toast's first fiber to the
+  absolute root walked into the main window's tree — toasts are
+  portal-rendered — and collected 673 candidates including window chrome
+  and Millennium's own UI. The walk now roots at the HostPortal fiber
+  (tag 4) whose containerInfo lives in the popup's document.
+
+A third incident was harness-side, not replay's: TestIncomingVoiceChat
+wedges the toast queue by itself (no caller exists to resolve the fake
+call), verified by A/B with zero clicks and zero invokes.
+
 ---
 
 ## Hypothesis

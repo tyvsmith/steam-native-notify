@@ -1,36 +1,25 @@
 import { callable } from 'millennium';
 import { dlog } from './log';
-import { CLICK_WINDOW_MS, invokeReplayHandler } from './replay';
+import { CLICK_WINDOW_MS, invokeReplayHandler, REPLAY_CLICK_PREFIX } from './replay';
 
 /**
- * The click bridge: every notification click is delivered through here.
- *
- * tools/notify-action writes the clicked payload to a click file, and this
- * end consumes it. On this branch the payload is a replay token
- * (`replay:<toast-name>`): the click re-runs the handler Steam attached to
- * that toast, stashed at capture time (replay.ts). Surface, navigation, and
- * side effects are whatever Steam's own click does -- there is no routing
- * catalog. Known limit (docs/experiments/click-replay.md): the handler is
- * frozen to the surface the toast rendered on.
- *
- * The poll is armed by deliverToast for CLICK_WINDOW_MS after each delivery
- * and stops itself afterwards, so an idle session polls nothing.
+ * The click transport: tools/notify-action writes each clicked payload
+ * (`replay:<toast-name>`, stamped with its write time) to a click file;
+ * this end consumes it and hands the name to replay.ts. The poll is armed
+ * by deliverToast for CLICK_WINDOW_MS after each delivery -- the same
+ * constant that bounds the handler stash, so a consumed click always finds
+ * its handler -- and stops itself afterwards; an idle session polls
+ * nothing.
  */
 const takeClick = callable<[], string>('TakeClick');
 
 const CLICK_POLL_MS = 1000;
 /**
- * notify-action stamps each click with its write time (<epoch-seconds>|
- * <payload>). The poll only runs while armed (CLICK_WINDOW_MS after each
- * delivery -- the same constant that bounds the handler stash, so a click
- * the poll consumes always finds its handler), and a click written after the
- * disarm would sit in the file and fire as a surprise on the NEXT arm, up to
- * days later; anything older than this is dropped instead of opened.
+ * A click written after the disarm would sit in the file and fire as a
+ * surprise on the NEXT arm, up to days later; anything older than this is
+ * dropped instead of opened.
  */
 const CLICK_MAX_AGE_S = 30;
-
-/** The payload prefix deliverToast hands notify-action for stashed toasts. */
-export const REPLAY_CLICK_PREFIX = 'replay:';
 
 let armedUntil = 0;
 let timer: number | null = null;
