@@ -1,6 +1,65 @@
 # Experiment: replay Steam's own toast click handler
 
-Status: planned, 2026-08-29. Branch: `experiment/click-replay`. Main untouched.
+Status: run 2026-08-29, verdict below. Branch: `experiment/click-replay`.
+Main untouched.
+
+## Results (2026-08-29, run live on Steam + Helldivers 2)
+
+**Verdict: the hypothesis survived every kill test, and full replay still
+fails the success criteria.** The stashed handler survives its toast's death
+in every form — plugin `win.close()`, natural dismissal, 10+ minutes, main
+window closed to tray — and replays Steam's click exactly. But a handler
+captured on the overlay surface is frozen there: invoked after the game
+exits it returns without throwing and does NOTHING (the overlay navigator
+it closed over has no surface; `overlay-info: []`). The current bridge in
+the same state opens desktop Settings, so this is a real regression, in
+exactly the surface-frozen failure mode predicted above.
+
+Lifecycle matrix (SystemUpdate; every invoke `returned without throwing`):
+
+| cell | condition | destination |
+|---|---|---|
+| a | toast on screen (age 3s) | opened — Settings raised, toast window visibly up |
+| b | after plugin `win.close()` (age 12s) | opened — Settings window appeared fresh |
+| b' | after natural dismissal (age 105s) | opened |
+| c | after game exit (overlay capture, age 381s) | **silent no-op** — no window, no error |
+| d | main window closed to tray (age 33s) | opened — Steam's navigator recreated the main window itself |
+| e | 10+ min after capture (age 615s) | no throw; dialog already open (idempotent) |
+
+Type matrix: the generic finder produced ONE unambiguous handler on every
+toast tried, on both surfaces — SystemUpdate `()=>d.Settings("System")`,
+Gift `()=>Xe(o,r.item)` (server registry -> SteamWeb), FriendMessage
+`()=>{I.LN.ShowFriendChatDialog(t,e)}` (desktop invoke verifiably opened
+the chat window), Screenshot (a real F12 capture)
+`()=>l.Media.Screenshot({state:{id:a}})` with the real handle. Every
+handler arrives drilled through 3-4 wrapper fibers, outermost-first; no
+inner-button misfires observed. GroupChatMessage was not exercised (needs
+a real group message); IncomingVoiceChat was never invoked (side effects).
+
+Focus-mismatch regressions: one class, observed in two handler families
+(settings dialog, media navigator): overlay-context stash invoked after the
+overlay died = silent swallow. The reverse case (desktop stash clicked
+in-game) was not measured; Steam's own desktop-context click behaves the
+same way, so it is mirror-equivalent, but the bridge is deliberately better
+there too.
+
+Durability (step 5): not exercised — no Steam client update landed during
+the experiment. The memory criterion's heap-snapshot spot check was not
+done.
+
+**Recommended path: close the branch.** Full replay is dead: the regression
+cannot be detected after the fact (the no-op invoke raises no error to
+trigger a fallback), so a hybrid must decide BEFORE invoking, using exactly
+the live-focus check the bridge already does. That hybrid keeps routes.ts,
+the doors, AND the replay machinery — all six of the bridge's shallow
+minified dependencies plus replay's two deep ones (fiber internals, prop
+names) — for a payoff of automatic parity only for types the catalog does
+not already cover, on the matched surface only. Every acting type is
+already cataloged and mirrored; replay replicated the bridge's behavior in
+every matched-surface cell and never exceeded it. The probe code stays on
+this branch as the record.
+
+---
 
 ## Hypothesis
 
