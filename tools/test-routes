@@ -10,9 +10,8 @@
 
 import { loadFrontendModules } from './load-frontend.mjs';
 
-const mods = loadFrontendModules(['notification', 'choose', 'generated/notifications']);
+const mods = loadFrontendModules(['notification', 'choose']);
 const { notification, choose } = mods;
-const schema = mods['generated/notifications'];
 
 let failures = 0;
 function check(what, ok, detail) {
@@ -42,18 +41,15 @@ function toastWindow(fiber) {
 	return { document: { querySelectorAll: () => [el] } };
 }
 
-const downloadFields = schema.fieldsForType(1);
-const appidField = Number(Object.keys(downloadFields).find((n) => downloadFields[n].name === 'appid'));
-const clientArray = [];
-clientArray[appidField - 1] = 570; // arrayIndexOffset_ -1 puts field N at N-1
+const clientArray = [570, 'x'];
 
 const client = notification.notificationFromToast(
-	toastWindow(fiberChain({ eType: 1, eSource: 1, data: { array: clientArray, arrayIndexOffset_: -1 } }, 0)),
+	toastWindow(fiberChain({ eType: 1, eSource: 1, data: { array: clientArray } }, 0)),
 );
 check('client toast decodes', client !== null && client.source === 'client', JSON.stringify(client));
 if (client?.source === 'client') {
 	is('client toast carries the type', client.type, 1);
-	is('client toast decodes appid by field number', client.fields.appid, 570);
+	is('client toast passes the raw array through', JSON.stringify(client.raw), JSON.stringify(clientArray));
 }
 
 const srv = notification.notificationFromToast(
@@ -76,10 +72,10 @@ check('unparseable body_data decodes with body null',
 	badBody?.source === 'server' && badBody.server.body === null, JSON.stringify(badBody));
 
 const deep = notification.notificationFromToast(
-	toastWindow(fiberChain({ eType: 1, eSource: 1, data: { array: clientArray, arrayIndexOffset_: -1 } }, 2)),
+	toastWindow(fiberChain({ eType: 1, eSource: 1, data: { array: clientArray } }, 2)),
 );
 check('notification found up the fiber.return chain',
-	deep?.source === 'client' && deep.fields.appid === 570, JSON.stringify(deep));
+	deep?.source === 'client' && deep.raw[0] === 570, JSON.stringify(deep));
 
 is('a window with no fiber yields null', notification.notificationFromToast(toastWindow(null)), null);
 

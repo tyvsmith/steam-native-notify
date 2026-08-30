@@ -1,5 +1,4 @@
 import { callable, definePlugin, IconsModule } from 'millennium';
-import { typeName } from './generated/notifications';
 import { notificationFromToast } from './notification';
 import { dlog, safeJson } from './log';
 import { armClickBridge, REPLAY_CLICK_PREFIX } from './clickbridge';
@@ -156,15 +155,18 @@ function deliverToast(win: Window, name: string, text: string): void {
 
 	// The decode no longer routes anything; it feeds the from-toast log line,
 	// which is what tools/capture and every diagnosis in this repo read.
-	let kind: string | undefined;
+	// Type numbers map to names via docs/notification-types.md; the client
+	// payload is the raw positional array (docs/regeneration.md has the
+	// schema that used to name its fields).
+	let type: number | undefined;
 	try {
 		if (fromToast) {
-			kind = typeName(fromToast.type);
+			type = fromToast.type;
 			const detail =
 				fromToast.source === 'server'
 					? `server type=${fromToast.server.type} url=${fromToast.server.url ?? ''} body=${safeJson(fromToast.server.body)}`
-					: `fields=${safeJson(fromToast.fields)}`;
-			dlog(`from-toast ${name} type=${fromToast.type} (${kind}) source=${fromToast.source} ${detail}`.slice(0, 700));
+					: `array=${safeJson(fromToast.raw)}`;
+			dlog(`from-toast ${name} type=${fromToast.type} source=${fromToast.source} ${detail}`.slice(0, 700));
 		}
 	} catch (e) {
 		dlog(`from-toast ${name} failed: ${(e as Error)?.message ?? e}`);
@@ -176,7 +178,7 @@ function deliverToast(win: Window, name: string, text: string): void {
 	// the observability contract are unchanged.
 	const suppressed = overlayCtx && settings().nativeToastInGame;
 	dlog(
-		`toast ${name} -> ${safeJson({ title, body, image, kind, route })}` +
+		`toast ${name} -> ${safeJson({ title, body, image, type, route })}` +
 			(suppressed ? ' (suppressed: native in-game)' : ''),
 	);
 	// The backend/notify-action contract is unchanged (five positional args);

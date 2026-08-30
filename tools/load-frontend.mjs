@@ -18,7 +18,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * Each name is a path under frontend/ without the .ts extension
- * ('routes', 'generated/notifications'); it is both a tsc entry file and a
+ * ('notification', 'choose'); it is both a tsc entry file and a
  * key in the returned { name: module } map. rootDir is pinned so output
  * paths mirror frontend/ no matter which entries are compiled.
  */

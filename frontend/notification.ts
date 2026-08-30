@@ -1,7 +1,23 @@
-import { fieldsForType } from './generated/notifications';
-
-/** A decoded protobuf scalar; repeated fields are not represented (none read). */
-export type PbValue = number | bigint | string;
+/**
+ * "React tree -> typed notification", in one place.
+ *
+ * Steam attaches its own decoded notification object to the toast's React
+ * tree: `{ eType, eSource, data, ... }`. The shape of `data` depends on
+ * `eSource` (docs/steam-routing.md): client-sourced (1), it is Steam's own
+ * decoded protobuf message, a Closure wrapper whose values sit POSITIONALLY
+ * in `array`. Server-sourced (2), it is a plain rollup object
+ * `{ type, item, url }` whose `item.body_data` is a JSON string.
+ *
+ * On this branch the decode feeds ONLY the from-toast log line -- clicks
+ * replay Steam's own handler and never read these fields -- so the client
+ * payload is passed through as the raw positional array. Field names come
+ * from the generated protobuf schema, which was removed with the routing
+ * catalog; docs/regeneration.md says where it lives and how to bring it
+ * back, and docs/notification-types.md maps the type numbers.
+ */
+export type DecodedNotification =
+	| { source: 'client'; type: number; raw: unknown[] }
+	| { source: 'server'; type: number; server: ServerNotification };
 
 /** The server (eSource=2) rollup, as the toast components receive it. */
 export interface ServerNotification {
@@ -9,24 +25,6 @@ export interface ServerNotification {
 	body: Record<string, unknown> | null;
 	url?: string;
 }
-
-/**
- * "React tree -> typed notification", in one place.
- *
- * Steam attaches its own decoded notification object to the toast's React
- * tree: `{ eType, eSource, data, ... }`. The shape of `data` depends on
- * `eSource` (docs/steam-routing.md): client-sourced (1), it is Steam's own
- * decoded protobuf message, a Closure wrapper whose values sit in `array` at
- * `fieldNumber + arrayIndexOffset_`, with field names from the generated
- * schema. Server-sourced (2), it is a plain rollup object `{ type, item, url }`
- * whose `item.body_data` is a JSON string.
- *
- * Everything that knows those two layouts lives here; consumers get a
- * discriminated union and never see eSource, fiber keys, or array offsets.
- */
-export type DecodedNotification =
-	| { source: 'client'; type: number; fields: Record<string, PbValue> }
-	| { source: 'server'; type: number; server: ServerNotification };
 
 /** eSource on Steam's notification object: which of the two systems produced it. */
 const SOURCE_SERVER = 2;
@@ -36,10 +34,8 @@ const SOURCE_SERVER = 2;
  *
  * Preferred over the notification feed because it sees more: an incoming voice
  * chat renders as `notificationtoasts_10000_desktop` and produces no feed
- * event at all, so anything relying on the feed cannot route it. The toast is
- * rendered from whatever produced the notification, so reading it here covers
- * every source. Returns null when the tree cannot be read; the toast is still
- * delivered, just without a route.
+ * event at all. Returns null when the tree cannot be read; the toast is still
+ * delivered, just without the log detail.
  */
 export function notificationFromToast(win: Window): DecodedNotification | null {
 	// Declared outside the try: a throw on a fiber ABOVE the notification must
@@ -75,7 +71,7 @@ export function notificationFromToast(win: Window): DecodedNotification | null {
 						const raw = data?.item?.body_data;
 						if (typeof raw === 'string' && raw) body = JSON.parse(raw);
 					} catch {
-						/* an unparseable body routes as null, and the raw dump in the log shows why */
+						/* an unparseable body logs as null, and the raw dump in the log shows why */
 					}
 					decoded = {
 						source: 'server',
@@ -87,20 +83,8 @@ export function notificationFromToast(win: Window): DecodedNotification | null {
 						},
 					};
 				} else {
-					const fields: Record<string, PbValue> = {};
-					const schema = fieldsForType(type);
 					const array = data?.array;
-					const offset = typeof data?.arrayIndexOffset_ === 'number' ? data.arrayIndexOffset_ : -1;
-					if (schema && Array.isArray(array)) {
-						for (const [num, field] of Object.entries(schema)) {
-							const value = array[Number(num) + offset];
-							// A repeated field arrives as an array, which PbValue cannot
-							// represent; no current route reads one, and this cast would
-							// hide it if one ever did. Extend PbValue before routing one.
-							if (value !== undefined && value !== null) fields[field.name] = value as PbValue;
-						}
-					}
-					decoded = { source: 'client', type, fields };
+					decoded = { source: 'client', type, raw: Array.isArray(array) ? array : [] };
 				}
 			}
 			if (decoded) break;

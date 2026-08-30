@@ -23,10 +23,15 @@ in-game and clicked after the game exits (or unfocused) silently no-ops where
 main routes to the desktop. The stash holds the latest 8 toasts for 120s;
 clicks past that (or after a Steam restart) do nothing.
 
+The routing catalog AND the generated protobuf schema are removed here;
+`docs/regeneration.md` records what they were, why, and how to bring either
+back, and branch `backup/routing-catalog` (pinned at main's tip) preserves
+the complete original implementation.
+
 ## Commands
 
 ```sh
-bun run build          # generate proto types, type-check, pack + install the .star
+bun run build          # type-check, pack + install the .star
 bun run typecheck      # tsc --noEmit on its own
 bun run test           # tools/test-backend (Lua, Millennium stubbed)
                        # + tools/test-routes (offline decode checks; the
@@ -40,7 +45,6 @@ tools/mep --methods    # talk to Millennium's external protocol (dev only)
 tools/fire --replay inspect   # dump the stashed handler candidates
 tools/fire --replay invoke    # invoke the latest stashed handler (no click)
 tools/notify-action --resolve-icon <url>
-bun run proto:check    # has Steam's protobuf drifted from vendor/
 ```
 
 Install: `bun install`, then `bun run build`; starlight packs the plugin into
@@ -135,9 +139,10 @@ When adding a route, cite the observation or Steam code path behind it.
 notification to the toast's React tree. The feed misses types entirely: an
 incoming voice chat produces no feed event at all.
 
-**Keep the generated protobuf schema.** `data.array` is positional; without field
-names, shape-guessing misroutes. `FriendInviteRollup.new_invite_count` of 3
-becomes `steam://nav/games/details/3`.
+**Nothing routes on the decode anymore.** Client payloads are logged as the
+raw positional `data.array` (the schema that named its fields left with the
+catalog; docs/regeneration.md brings it back). Type numbers map to names via
+docs/notification-types.md.
 
 **Edit files directly, and verify the edit landed.** Positional splices and loose
 regexes silently dropped edits and deleted a live declaration twice.
@@ -154,9 +159,7 @@ frontend/log.ts           dlog/safeJson; prefixes are capture's contract
 frontend/clickbridge.ts   every click: .click file -> replay by toast name
 frontend/devfire.ts       tools/fire door, gated by a setting
 frontend/Settings.tsx     settings panel; settings.ts, one JSON document
-frontend/generated/       generated from vendor/*.proto, do not edit
 backend/main.lua          pure marshaller                (Millennium Lua host)
 tools/notify-action       escaping, delivery; a click writes .click (POSIX sh,
                           packed as a .star asset, materialized to ~/.cache)
-vendor/                   Steam's published .proto plus provenance
 ```

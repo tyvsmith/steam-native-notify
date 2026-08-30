@@ -8,10 +8,7 @@
   "type": "module",
   "scripts": {
     "dev": "starlight watch",
-    "build": "bun tools/gen-proto.mjs && tsc --noEmit && starlight pack",
-    "gen": "bun tools/gen-proto.mjs",
-    "proto:check": "bun tools/proto-sync.mjs --check",
-    "proto:update": "bun tools/proto-sync.mjs --update",
+    "build": "tsc --noEmit && starlight pack",
     "typecheck": "tsc --noEmit",
     "prepare": "starlight lsp",
     "test": "tools/test-backend && bun tools/test-routes"
