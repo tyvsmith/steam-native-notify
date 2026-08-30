@@ -339,7 +339,8 @@ local function delivered_body(gdbus_script)
 	g:close()
 	local ns = assert(io.open(dir .. "/notify-send", "w"))
 	ns:write(([[#!/bin/sh
-printf '%%s' "${10}" > %s/body
+for a; do last=$a; done
+printf '%%s' "$last" > %s/body
 exit 0
 ]]):format(dir))
 	ns:close()
@@ -416,6 +417,8 @@ exit 0
 		sent_args:find("-i\nsteam\n", 1, true) ~= nil
 			and sent_args:find("-i\n" .. iconargs_dir, 1, true) == nil,
 		sent_args)
+	check("delivery carries the desktop-entry hint",
+		sent_args:find("string:desktop-entry:steam", 1, true) ~= nil, sent_args)
 	io.popen("rm -rf '" .. iconargs_dir .. "'"):close()
 else
 	print("  skip icon-args (mktemp failed)")

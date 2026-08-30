@@ -193,7 +193,11 @@ esac
 # silently then, so retry for ~30s rather than lose the notification; a
 # machine with no daemon at all gives up quietly.
 tries=0
-until chosen=$(notify-send -a "$APP_NAME" "$@" -t "$EXPIRE" \
+# desktop-entry names steam.desktop: GNOME and KDE brand the notification
+# from it (app name, logo badge, per-app grouping/settings). Daemons that do
+# not read it ignore it. Millennium never runs under Flatpak Steam, so the
+# native name is always right.
+until chosen=$(notify-send -a "$APP_NAME" -h string:desktop-entry:steam "$@" -t "$EXPIRE" \
 	-A "$ACTION=Open" "$title" "$body" 2>/dev/null); do
 	# Retry ONLY while the daemon is absent. A failure with the daemon
 	# reachable is something else (it may even have fired after the toast
