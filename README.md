@@ -71,7 +71,9 @@ the vocabulary table is in `docs/architecture.md`.
 
 - Linux only, native Steam only (not Flatpak or Snap), with any FreeDesktop
   notification daemon that supports actions. Without action support the
-  notification shows but the click does nothing.
+  notification shows but the click does nothing. On Windows the backend
+  loads, logs that delivery is not implemented, and delivers nothing;
+  `docs/windows-plan.md` is the plan.
 - The 64-bit SteamRT3 client does not work: Millennium installs and reports
   success there, but its hook does nothing
   ([Millennium #840](https://github.com/SteamClientHomebrew/Millennium/issues/840)).
