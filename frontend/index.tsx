@@ -180,7 +180,9 @@ function deliverToast(win: Window, name: string, text: string): void {
 	// The backend/notify-action contract is unchanged (five positional args);
 	// the replay token travels in the route slot and comes back through the
 	// click file verbatim, so neither end needed to learn about replay.
-	if (!suppressed) void notify(title, body, image ?? '', route ?? '', '');
+	const notifyResult: Promise<string> | null = suppressed
+		? null
+		: notify(title, body, image ?? '', route ?? '', '');
 
 	// notify-action delivers every click back through a file; arm the bridge
 	// that picks it up and chooses the surface by live focus (clickbridge.ts).
@@ -191,12 +193,24 @@ function deliverToast(win: Window, name: string, text: string): void {
 	// Closing Steam's own popup is what stops a notification being reported
 	// twice. Done here rather than with a compositor rule because the plugin
 	// knows the read succeeded, and because it works on any window manager.
-	if (settings().hideSteamToast && !suppressed) {
-		try {
-			win.close();
-		} catch (e) {
-			dlog(`could not close ${name}: ${(e as Error)?.message ?? e}`);
-		}
+	// Gated on the backend answering "ok": a platform whose delivery is not
+	// implemented, or a failed spawn, must leave Steam's own toast alone or
+	// the notification vanishes entirely. The answer can arrive raw or
+	// JSON-quoted depending on the transport.
+	if (settings().hideSteamToast && notifyResult) {
+		void notifyResult
+			.then((result: string) => {
+				if (result !== 'ok' && result !== '"ok"') {
+					dlog(`toast ${name} left open: backend answered ${String(result).slice(0, 60)}`);
+					return;
+				}
+				try {
+					win.close();
+				} catch (e) {
+					dlog(`could not close ${name}: ${(e as Error)?.message ?? e}`);
+				}
+			})
+			.catch((e: unknown) => dlog(`toast ${name} left open: notify failed: ${(e as Error)?.message ?? e}`));
 	}
 }
 

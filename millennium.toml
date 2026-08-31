@@ -6,9 +6,15 @@ author = "Ty Smith"
 description = "Mirrors Steam's in-client notification toasts to the desktop notification daemon via notify-send."
 
 [assets]
-# The backend materializes tools/notify-action out of the .star at load
-# (backend/main.lua, install_helper); a .star is never unpacked on disk.
-resources = ["tools/notify-action"]
+# The backend materializes each platform's delivery files out of the .star at
+# load (backend/main.lua, materialize_asset); a .star is never unpacked on
+# disk. POSIX runs notify-action; Windows runs notify-action.ps1 and
+# registers click-handler.js as the snn: URI handler.
+resources = [
+    "tools/notify-action",
+    "tools/notify-action.ps1",
+    "tools/click-handler.js",
+]
 
 [backend]
 entry = "backend/main.lua"

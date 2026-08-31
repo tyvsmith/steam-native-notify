@@ -14,20 +14,18 @@ or **unverified**. Nothing here has run anywhere but native Linux.
 | Linux, native Steam | **shipped** | `notify-send` to the FreeDesktop daemon | `default` action, `.click` file, bridge |
 | Linux, Flatpak Steam | paths ready; the host is unsupported by Millennium | same helper; inside the sandbox libnotify routes through the notification portal (plan) | same file contract; portal semantics unverified |
 | macOS | backend paths ready; delivery refused, loudly | terminal-notifier `-execute` (plan) | `-execute` writes `.click` (plan) |
-| Windows | backend paths ready; delivery refused, loudly | SnoreToast behind PowerShell (plan) | exit code 0 writes `.click` (plan) |
+| Windows | **EXPERIMENTAL**: delivery shipped, unvalidated on real hardware | WinRT toast via notify-action.ps1 (Windows PowerShell 5.1, no vendored binary) | protocol activation: the snn: URI scheme's handler writes `.click` |
 
-Refused means: the backend loads, logs `desktop delivery is not implemented
-on <platform>` at load and `unsupported platform: <platform> delivery is not
-implemented, notification dropped` per toast, and `Notify` answers
-`"unsupported"`. Nothing is delivered and nothing is silent.
+Refused (macOS today) means: the backend loads, logs `desktop delivery is
+not implemented on <platform>` at load and `unsupported platform: <platform>
+delivery is not implemented, notification dropped` per toast, and `Notify`
+answers `"unsupported"`. Nothing is delivered and nothing is silent.
 
-**One item comes before any delivery work on macOS or Windows.** The
-frontend closes Steam's own toast (`hideSteamToast`, on by default) without
-waiting for the backend's answer (`frontend/index.tsx`: `void notify(...)`,
-then `win.close()`). On a refusing platform that swallows the toast and
-delivers nothing. Gate the close on `Notify` resolving to `"ok"`. That is a
-frontend change, so it needs Linux live verification (the repo's live-verify
-skill) before it ships.
+**Shipped:** the frontend closes Steam's own toast only after `Notify`
+answers `"ok"` (frontend/index.tsx), so a platform that cannot deliver -- or
+a failed spawn anywhere -- leaves Steam's own toast alone instead of
+swallowing the notification. Linux live verification rides the branch that
+shipped it.
 
 ## What differs per platform
 
@@ -43,20 +41,23 @@ slots (`title body image route ingame`) are the contract on every platform.
 | runtime directory | `$XDG_CACHE_HOME/steam-native-notify` (`~/.cache/...`) | `$XDG_CACHE_HOME` is `~/.var/app/com.valvesoftware.Steam/cache` there, so `.../cache/steam-native-notify` | `~/Library/Caches/steam-native-notify` | `%LOCALAPPDATA%\steam-native-notify` |
 | `millennium.steam_path()` | `~/.steam/steam/` | `~/.steam/steam/` (resolves inside the sandbox) | `~/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS` | `HKCU\Software\Valve\Steam\SteamPath` |
 | Steam data guesses, after `steam_path()` | `~/.steam/steam`, `~/.local/share/Steam`, then `~/.var/app/com.valvesoftware.Steam/{.local/share/Steam,.steam/steam}` | the same list; `$HOME`-relative entries resolve through `--persist=.` | `~/Library/Application Support/Steam` | none: the registry is the only source |
-| helper spawn | `sh <helper> ... >/dev/null 2>&1 &` | same | same call would work; refused until the helper has a macOS branch | refused; `ffi` `CreateProcessW` with `CREATE_NO_WINDOW` (plan) |
-| helper | `tools/notify-action` (POSIX sh, notify-send) | same, through the portal | Darwin branch of the same sh, terminal-notifier (plan) | `tools/notify-action.ps1` + `snoretoast.exe` (plan) |
-| desktop entry / app identity | `steam` | `com.valvesoftware.Steam` | the sending bundle's identity | AUMID via a Start-menu shortcut (plan) |
+| helper spawn | `sh <helper> ... >/dev/null 2>&1 &` | same | same call would work; refused until the helper has a macOS branch | `ffi` `CreateProcessW` with `CREATE_NO_WINDOW`, payload in a `<id>.notify` file (EXPERIMENTAL) |
+| helper | `tools/notify-action` (POSIX sh, notify-send) | same, through the portal | Darwin branch of the same sh, terminal-notifier (plan) | `tools/notify-action.ps1` (WinRT toast) + `tools/click-handler.js` (snn: URI handler), no vendored binary (EXPERIMENTAL) |
+| desktop entry / app identity | `steam` | `com.valvesoftware.Steam` | the sending bundle's identity | registry-only AUMID under HKCU, icon extracted from the user's steam.exe (EXPERIMENTAL) |
 | log | `<runtime>/plugin.log`; Millennium's loader lines in `~/.steam/steam/logs/console-linux.txt` | `<runtime>/plugin.log` in the per-app cache | `<runtime>/plugin.log` | `<runtime>\plugin.log` |
 | dev tools | `tools/fire`, `tools/capture`, `tools/mep` | need a `--flatpak` path switch (plan) | need the macOS paths (plan) | `fire.ps1`, `capture.ps1` (plan) |
 
 Files in the runtime directory: `plugin.log` (truncated at each backend
-load; the helper appends its refusals there), `notify-action` (the
-materialized helper, Linux only today), `steam-dir` (one line: Millennium's
-`steam_path()` answer, rewritten at each load, removed when there is no
-answer), `.click` and `.dev-fire` (consume-once handoffs), `icons/` (the
-helper's avatar cache). `tools/test-backend` loads the backend three times,
-under Linux, Windows and macOS configurations, and asserts every row above
-that the backend owns.
+load; the helper appends its refusals there), the materialized helper
+(`notify-action` on Linux; `notify-action.ps1` plus `click-handler.js` on
+Windows), `steam-dir` (one line: Millennium's `steam_path()` answer,
+rewritten at each load, removed when there is no answer), `.click` and
+`.dev-fire` (consume-once handoffs), `icons/` (the helper's avatar cache),
+and on Windows `<id>.notify` payload files (helper-consumed), `steam.ico`
+(the extracted branding icon) and `.wpn-backoff` (the platform-wedge
+back-off stamp). `tools/test-backend` loads the backend under Linux,
+Windows (with and without a stubbed ffi) and macOS configurations, and
+asserts every row above that the backend owns.
 
 ### How the platform is detected
 
@@ -90,8 +91,11 @@ that the backend owns.
   runtime: ...`); the helper uses it for the desktop-entry name.
 - Millennium's Lua API has no platform call; `millennium` exposes `ready`,
   `version`, `steam_path`, `get_install_path`, `call_frontend_method`,
-  `cmp_version`, `is_plugin_enabled`, `config.*`, `assets.read`, and `utils`
-  is arithmetic and time. **Verified:**
+  `cmp_version`, `is_plugin_enabled`, `config.*`, `assets.read`. `utils`
+  carries arithmetic and time plus `getenv`/`setenv`, `exec`,
+  `url_encode`/`hex_encode`/`base64_encode`, `uuid`, `hash` and file
+  read/write helpers (`exec` is `_popen`-backed, which is why the Windows
+  spawn does not use it). **Verified:**
   [src/lua_host/api/types/millennium.lua](https://github.com/SteamClientHomebrew/Millennium/blob/main/src/lua_host/api/types/millennium.lua),
   [utils.lua](https://github.com/SteamClientHomebrew/Millennium/blob/main/src/lua_host/api/types/utils.lua).
   `fs.join(...)` exists in the stubs
@@ -398,7 +402,7 @@ A macOS tester, in order. Pass signals are in
 
 | item | estimate |
 |---|---|
-| frontend: close Steam's toast only on `"ok"` (shared with Windows) | 0.5 d |
+| frontend: close Steam's toast only on `"ok"` -- shipped with the Windows branch | done |
 | Darwin branch of `tools/notify-action`, click writer, `shasum` fallback | 1 d |
 | `tools/fire` and `tools/capture` macOS paths | 0.5 d |
 | branded terminal-notifier copy, or the Homebrew-only route | 0.5 to 1 d |
@@ -416,438 +420,154 @@ Three to four days with a Mac. Without one, only the first row.
 - Does `-execute` fire for a body click on a banner, or only from
   Notification Center? (The README says "when the notification is clicked".)
 
-## Windows: backend paths ready, delivery planned
+## Windows: EXPERIMENTAL delivery shipped, unvalidated
 
-The plan for delivering Steam's toasts to Windows' own notification system.
-Nothing here has run on Windows.
+Every piece below ships in the plugin, and none of it has run on a real
+Windows machine. The backend says so at load ("windows delivery is
+EXPERIMENTAL and unvalidated"), README carries the same warning, and the
+validation pass at the end is the gate out of the mark.
+
+An earlier draft vendored SnoreToast behind a Start-menu shortcut. An
+adversarial review took that apart against primary sources: the shortcut
+requirement is Windows-8-era documentation that Microsoft's own
+ToastNotificationManagerCompat no longer follows (it registers a per-user
+registry key), and nothing in the click contract needs a process waiting on
+the toast. What ships instead is native end to end: no vendored binary, no
+shortcut, every registration per-user and reversible.
 
 ### Scope
 
 - deliver every captured toast as a WinRT toast notification, with the
   artwork, and re-run Steam's own click handler when the banner is clicked
 - keep the frontend, the click-file contract, and the log vocabulary
-  unchanged, so `tools/capture`-style triage reads the same on every OS
+  unchanged, so capture-style triage reads the same on every OS
 - keep Linux delivery byte-for-byte as it is today
 
-Non-goals:
+Non-goals: a signed installer, a Start-menu entry, or any per-machine setup
+beyond what the plugin does itself at load; 32-bit Windows.
 
-- clicks from the Action Center after the banner has gone (phase 2, below)
-- a signed installer, Start menu entry, or any per-machine setup beyond what
-  the plugin can do itself at load
-- 32-bit Windows
+### Shape
 
-### Where things stand
+    backend (main.lua), one per notification
+      writes <id>.notify      the five slots as JSON; a file, not a command
+                              line, so quoting stays out of the contract
+      CreateProcessW          LuaJIT ffi, CREATE_NO_WINDOW. os.execute is
+                              the CRT's system(), which runs cmd.exe and
+                              flashes a console from Millennium's
+                              GUI-subsystem host; io.popen is _popen,
+                              documented to hang in GUI programs. Without
+                              ffi this degrades to a log line.
+        powershell.exe -File notify-action.ps1 -Id <id>
+          reads + deletes <id>.notify
+          resolves the icon   library cache via the published steam-dir;
+                              CDN avatars downloaded once, sha1-named,
+                              30-day prune -- the POSIX helper's scheme
+          re-encodes >190KB   Windows drops oversized toast images
+                              SILENTLY; a 256px PNG re-encode keeps
+                              Steam's JPEG art visible
+          builds ToastGeneric appLogoOverride, hint-crop="circle" for
+                              avatars; activationType="protocol"
+                              launch="snn:replay/<toast-name>" only when a
+                              route exists -- no route, no launch: the
+                              click only dismisses, mirroring Steam
+          Show(), exit        no waiting process, ever
 
-The groundwork already on this branch: platform detection off
-`package.config`, the per-OS runtime directory, `steam_path()`-first
-discovery, the published `steam-dir`, binary-mode materialization, and the
-`spawn_helper` seam whose Windows branch logs `unsupported platform` and
-returns. A Windows install today fails in `plugin.log`, never silently.
-`tools/test-backend` loads the backend under a Windows `package.config` and
-asserts all of it.
+    a click (banner; Action Center too if persistence holds, see pass 7)
+      Windows ShellExecutes the snn: handler registered at setup:
+        wscript //B click-handler.js "snn:replay/<name>"
+          validates ^snn:replay/[A-Za-z0-9_.-]+$   the one security-
+                              sensitive line: the argument arrives through
+                              the shell, so anything else is dropped
+          writes <epoch>|replay:<name> -> .click.tmp -> .click
+      the in-Steam bridge consumes it exactly as on Linux
 
-### How the backend runs on Windows
+Only `replay:` routes carry on Windows, which is not a loss: the bridge
+refuses every other shape on Linux too (`click-bridge: unbridgeable route`),
+and the frontend has emitted nothing but replay tokens since the routing
+catalog left. The POSIX helper writes any non-empty route to the click file
+and lets the bridge refuse; the Windows toast simply omits the launch
+attribute instead, so the click dismisses -- same outcome, decided one step
+earlier.
 
-These facts shape every decision below.
+### Setup, run at every load (idempotent, reversible)
 
-- Millennium runs each plugin's Lua backend in its **own child process**
-  (`millennium_luavm`), a LuaJIT VM that talks to Steam over a socket. On
-  Windows that executable is built `WIN32_EXECUTABLE TRUE`: GUI subsystem,
-  no console. **Verified:**
-  [src/lua_host/main.cc](https://github.com/SteamClientHomebrew/Millennium/blob/main/src/lua_host/main.cc)
-  (header comment: "standalone child process for a single plugin backend"),
-  [src/lua_host/CMakeLists.txt](https://github.com/SteamClientHomebrew/Millennium/blob/main/src/lua_host/CMakeLists.txt).
-  A blocking call in the backend therefore stalls this plugin's RPC loop
-  (its own `TakeClick`/`TakeDevCommand` polls), not Steam's UI thread. The
-  existing "never block the Steam UI thread" comments in `main.lua` overstate
-  it; the constraint still holds because the bridge polls every second.
-- LuaJIT is built 32-bit (`-m32`) with the vendored `LuaJIT.cmake`, whose
-  `LUAJIT_DISABLE_FFI` defaults to `OFF`; a code search finds no override.
-  **Unverified** that `require("ffi")` works inside a plugin: confirm with
-  `pcall(require, "ffi")` on a Windows install before building on it.
-  Sources:
-  [thirdparty/forks/luajit/LuaJIT.cmake](https://github.com/SteamClientHomebrew/Millennium/blob/main/thirdparty/forks/luajit/LuaJIT.cmake),
-  [src/CMakeLists.txt](https://github.com/SteamClientHomebrew/Millennium/blob/main/src/CMakeLists.txt).
-- `os.execute` is the C runtime's `system()`, which runs `cmd.exe`.
-  **Verified:** [LuaJIT lib_os.c](https://github.com/LuaJIT/LuaJIT/blob/v2.1/src/lib_os.c)
-  (`int stat = system(cmd)`),
-  [system, _wsystem](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/system-wsystem)
-  ("uses the COMSPEC and PATH environment variables to locate the
-  command-interpreter file CMD.exe").
-- `io.popen` and Millennium's `utils.exec` are `_popen`. Microsoft's own
-  note: "If used in a Windows program, the `_popen` function returns an
-  invalid file pointer that causes the program to stop responding
-  indefinitely. `_popen` works properly in a console application."
-  **Verified** as documentation:
-  [_popen, _wpopen](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/popen-wpopen);
-  **unverified** whether the modern CRT still behaves that way. Treat both
-  as unusable from the GUI-subsystem host until proven otherwise.
-- `millennium.yield_readable(fd)` parks a coroutine until an fd is readable,
-  but the Windows build polls with `WSAPoll`, which takes sockets only. It
-  cannot wait on a pipe or process handle. **Verified:**
-  [src/include/millennium/plugin_ipc.h](https://github.com/SteamClientHomebrew/Millennium/blob/main/src/include/millennium/plugin_ipc.h),
-  [src/lua_host/rpc.cc](https://github.com/SteamClientHomebrew/Millennium/blob/main/src/lua_host/rpc.cc).
-- The stdlib has `http.download(url, path [, opts])`, streamed to disk by the
-  parent process over RPC, alongside `http.get`. It is missing from the LSP
-  stubs starlight generates. **Verified:**
-  [src/lua_host/api/http.cc](https://github.com/SteamClientHomebrew/Millennium/blob/main/src/lua_host/api/http.cc).
-- Plugins install to `<steam>\millennium\plugins` on Windows. **Verified:**
-  [src/system/environment.cc](https://github.com/SteamClientHomebrew/Millennium/blob/main/src/system/environment.cc).
-  **Unverified:** that starlight's `output_path = "auto"` resolves to that
-  directory.
+`notify-action.ps1 -Setup`, spawned by on_load:
 
-### The Windows helper
+- `HKCU\Software\Classes\AppUserModelId\me.tysmith.steam-native-notify`:
+  `DisplayName` "Steam", `IconUri` an icon extracted from the user's own
+  steam.exe (System.Drawing) -- branding without shipping Valve artwork and
+  without a Start-menu shortcut. HKCU merges over HKLM in the classes view,
+  so no elevation. This is the registration Microsoft's compat layer
+  performs.
+- `HKCU\Software\Classes\snn`: `URL Protocol` plus `shell\open\command`
+  pointing wscript at the materialized click-handler.js.
+- `-Teardown` removes both keys and the icon; nothing else is left behind.
 
-#### SnoreToast, what it actually does
+### Facts under the design (sourced by the adversarial review)
 
-[KDE/snoretoast](https://github.com/KDE/snoretoast) is a small C++ CLI over
-the WinRT toast API. **Verified** from its README and source:
+- An AUMID string is required to Show(); a *registered* one is required
+  only for branding. Registry-only registration is what
+  ToastNotificationManagerCompat performs; the Start-menu-shortcut
+  requirement is Windows-8-era text.
+- Protocol activation is the documented path for unpackaged apps: banner
+  (and Action Center) clicks ShellExecute the launch URI with no COM
+  activator and no living sender ("ToastGeneric Protocol: Supported").
+- Windows PowerShell 5.1, never pwsh: .NET 5+ removed WinRT projection
+  (PlatformNotSupportedException). In-process add_Activated events on 5.1
+  are folklore -- BurntToast gates them to pwsh 7.1+ -- which is why clicks
+  ride the URI scheme instead of a waiting process.
+- The notification platform can wedge under bursts ("The notification
+  platform is unavailable"; documented recovery is a service restart or a
+  reboot). After one such failure the helper drops sends for 60 s, one log
+  line each, instead of hammering the service.
+- `scenario="urgent"` exists in the toast schema to break through Focus
+  Assist per app -- the documented answer to in-game suppression. Not sent
+  yet; first candidate once validation passes.
 
-- **there is no `-w` flag.** It always blocks: `userAction()` waits on an
-  event until the toast is clicked, dismissed, hidden, or times out, capped
-  by `EVENT_TIMEOUT = 60 * 1000` ms
-  ([snoretoasts.cpp](https://github.com/KDE/snoretoast/blob/master/src/snoretoasts.cpp)).
-  This is the same blocking shape as `notify-send --action`, which is what
-  the helper design needs; the correction only matters for the wrapper's
-  argument list.
-- the exit code is the action
-  ([snoretoastactions.h](https://github.com/KDE/snoretoast/blob/master/src/snoretoastactions.h)):
-  `0` Clicked (the README calls it Success), `1` Hidden, `2` Dismissed,
-  `3` TimedOut, `4` ButtonPressed, `5` TextEntered, `-1` Error. A body click
-  is `0`; the wrapper treats only `0` as a click.
-- options are lowercased before matching; `-t` title, `-m` message,
-  `-p <image>` "local files only", `-d short|long` (7 s or 25 s banner),
-  `-id`, `-silent`, `-appID`, `-install <shortcut> <exe> <appID>`,
-  `-pipeName`/`-application` for callbacks after the process has exited,
-  `-close <id>`.
-- without `-appID` it creates its own Start menu shortcut
-  (`SnoreToast\<version>\SnoreToast.lnk`, AUMID
-  `Snore.DesktopToasts.<version>`) and the toast is branded "SnoreToast".
-  With an AUMID that is "not properly registered" it runs in a fallback
-  mode with "no text replies or buttons" (comment in `snoretoasts.h`).
-- LGPL-3.0, Windows 8 or later. Latest tag `v0.9.1`; KDE publishes only the
-  source tarball (`snoretoast-v0.9.1.tar.bz2`, 2025-10-27, at
-  `download.kde.org/stable/snoretoast/`) and the GitHub releases carry no
-  binaries. `node-notifier` vendors `snoretoast-x64.exe` (2.5 MB) and
-  `snoretoast-x86.exe` (2.0 MB) of an unstated version.
+### Validation pass (the gate out of EXPERIMENTAL; about one sitting)
 
-#### Shape
+Order matters: the first two decide the design, the rest exercise it.
 
-```
-backend/main.lua      Notify -> write <id>.notify (five slots, JSON, UTF-8)
-                      -> spawn_helper: powershell.exe -File notify-action.ps1 <id>.notify
-tools/notify-action.ps1
-                      read + delete the .notify file; read steam-dir
-                      resolve the icon (<steam>\appcache\librarycache, or CDN download into icons\)
-                      snoretoast.exe -t -m -p -appID -d long -id <id>
-                      exit 0  -> write <epoch>|<route> to .click.<pid>, Move-Item -Force to .click
-frontend/clickbridge.ts   unchanged: polls TakeClick, replays by toast name
-```
-
-Decisions, each with the reason:
-
-- **Hand the payload over in a file, not on the command line.** Windows
-  command lines are UTF-16 and parsed by the C runtime's own quoting rules;
-  a chat message with quotes, backslashes, or non-ASCII would need a second
-  quoting function and a codepage conversion. A JSON file in the runtime
-  directory needs neither, and the command line stays ASCII apart from the
-  two paths below. The five slots (title, body, image, route, ingame) stay
-  the contract; only the transport changes, and only on Windows.
-- **The Steam directory comes from `steam-dir`,** the same one-line file the
-  Linux helper reads, published by the backend from `steam_path()` at load.
-  One mechanism on every platform; the `.notify` file carries the five slots
-  only.
-- **Windows PowerShell 5.1, not pwsh.** It ships with every supported
-  Windows; `pwsh` does not. Run with `-NoProfile -NonInteractive
-  -ExecutionPolicy Bypass -File`.
-- **`-d long`** (25 s). Linux uses `-t 0` (no expiry), which quickshell
-  ignores at ~8 s. The banner is the click window on both OSes; 25 s is the
-  most WinRT allows without a "scenario" flag.
-- **Icon download without curl:** `Invoke-WebRequest -OutFile` into
-  `icons\<sha1>.<ext>` with the same download-to-`.part`-then-rename and
-  30-day prune as `tools/notify-action`. Game art needs no download:
-  `steamloopback.host/assets/<appid>/<file>` maps to
-  `<steam>\appcache\librarycache\<appid>\<file>`, the same layout as Linux.
-  `-p` accepts local files only, so the file must exist before
-  `snoretoast.exe` starts; there is no `file://` hint to learn.
-- **`http.download` in the backend instead:** evaluated, deferred. It would
-  drop the download from both helpers and the Linux loader-environment scrub
-  with it, but it blocks the backend's single loop for up to the timeout
-  (5 s) per notification, and it changes Linux delivery. Worth a separate
-  experiment once Windows works: measure the stall, then decide for both
-  OSes at once.
-- **Click file byte-identical:** `<epoch-seconds>|<payload>`, written to a
-  temp name and moved over `.click` (`Move-Item -Force` replaces atomically
-  enough for a 1 s poll). Epoch via
-  `[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()`. `TakeClick` reads and
-  `os.remove`s it, unchanged.
-- **Retry:** none. The WinRT notification platform is always up; a
-  `-1` from `snoretoast.exe` is logged, not retried.
-- **Log:** the wrapper appends nothing to `plugin.log`; `spawn_helper` logs
-  the spawn, and a `--verbose` switch on the wrapper writes its own
-  `helper.log` next door for triage.
-
-#### AUMID
-
-A desktop app cannot raise a toast without an AppUserModelID. **Verified:**
-[How to enable desktop toast notifications through an AppUserModelID](https://learn.microsoft.com/en-us/windows/win32/shell/enable-desktop-toast-with-appusermodelid):
-"Without a valid shortcut installed in the Start screen or in **All
-Programs**, you cannot raise a toast notification from a desktop app." The
-shortcut carries `System.AppUserModel.ID`; the toast shows that
-registration's name and icon.
-
-Options:
-
-1. **Let SnoreToast self-register.** Zero work; toasts read "SnoreToast" with
-   its icon. Unacceptable as shipped UX, fine for the first smoke test.
-2. **Register our own shortcut at load** (recommended):
-   `snoretoast.exe -install "Steam Notifications\Steam Notifications.lnk"
-   "<steam>\steam.exe" "me.tysmith.steam-native-notify"`, once, idempotent
-   (skip when the `.lnk` exists). The shortcut's target supplies the icon,
-   so pointing it at `steam.exe` should brand the toast with Steam's logo
-   under the name "Steam Notifications". **Unverified:** that the toast icon
-   follows the shortcut target's icon rather than the registering process;
-   confirm on hardware. Do not name it "Steam": Valve's own
-   `Programs\Steam\Steam.lnk` already exists, and a second Start entry with
-   the same name would sit next to it. `-install` also stamps SnoreToast's
-   COM activator CLSID into the shortcut, which is what phase 2 needs.
-3. **Registry-only registration** (`Software\Classes\AppUserModelId\<AUMID>`
-   with `DisplayName` and `IconUri`). Microsoft documented this for
-   "other types of unpackaged apps"; the page
-   (`.../send-local-toast-other-apps`) returns 404 at the time of writing
-   and a search snippet places the key under `HKLM`, which the plugin cannot
-   write. **Unverified**; revisit if the shortcut proves fragile.
-
-Uninstall: nothing removes the shortcut today. Record it in the README; a
-`tools/uninstall.ps1` is a phase-2 nicety.
-
-#### The console-window flash
-
-`os.execute` runs `cmd.exe`, a console application, from a parent that has
-no console. Windows gives it a new console window, which flashes and closes
-per notification. `powershell.exe` is a console application too, so wrapping
-does not help; the process must be created with `CREATE_NO_WINDOW`
-("The process is a console application that is being run without a console
-window"). **Verified** as documentation:
-[Process Creation Flags](https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags);
-the flash itself is **unverified** on hardware but is the same failure every
-Windows project that spawns `powershell.exe` from a GUI process reports.
-
-Candidates, in order:
-
-1. **LuaJIT `ffi` to `CreateProcessW` with `CREATE_NO_WINDOW`** (recommended).
-   About forty lines of `ffi.cdef` (`STARTUPINFOW`, `PROCESS_INFORMATION`,
-   `CreateProcessW`, `CloseHandle`, `MultiByteToWideChar` for the command
-   line) in the Windows branch of `spawn_helper`. No `cmd.exe`, no extra
-   binary, no console at all. The handles are closed immediately; the
-   helper runs detached. Risk: a wrong `cdef` crashes the Lua host, which is
-   its own process ("If we segfault the parent keeps running", `main.cc`).
-   Gated on the `ffi` check above.
-2. **A `spawn` primitive upstream in Millennium's `utils`**, with `hidden` and
-   `detached` options. The right long-term answer for every plugin; slower,
-   and this project would wait on a release. File the request either way.
-3. **`wscript.exe` + `.vbs` (`Run cmd, 0, False`)**, the usual community
-   trick, does not apply: it still has to be started by `os.execute`, and
-   the `cmd.exe` that starts it is the flash.
-4. **`utils.exec` / `io.popen`:** flashes, and carries the `_popen` hang
-   warning. No.
-
-If `ffi` turns out to be disabled, stop and pursue candidate 2 before
-writing any wrapper code; a flashing console per notification is worse than
-no delivery.
-
-**Quoting the `CreateProcessW` call.** Both paths on the command line can
-hold spaces and non-ASCII (`%LOCALAPPDATA%` carries the user name;
-`%SystemRoot%` can be anywhere). Microsoft: with `lpApplicationName` NULL
-"the module name must be the first white space–delimited token in the
-lpCommandLine string. If you are using a long file name that contains a
-space, use quoted strings", and the security remark: "do not pass NULL for
-lpApplicationName". **Verified:**
-[CreateProcessW](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw).
-So: `lpApplicationName` is the full path of `powershell.exe`
-(`%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`),
-`lpCommandLine` is built as `"<powershell.exe>" -NoProfile -NonInteractive
--ExecutionPolicy Bypass -File "<script>" "<notify-file>"` with every path in
-double quotes (neither can contain a double quote: both live under
-`%LOCALAPPDATA%` and `%SystemRoot%`, whose names Windows forbids `"` in),
-converted UTF-8 to UTF-16 with `MultiByteToWideChar(CP_UTF8, ...)` into a
-writable buffer (the W function may modify it). `tools/test-backend` asserts
-the produced command line for a runtime directory with a space and one with
-a non-ASCII user name when the branch lands.
-
-#### Focus Assist and Do not disturb
-
-Windows suppresses banners during games by default. **Verified:**
-
-- Windows 10, Focus assist: "It's set by default to activate automatically
-  when you're duplicating your display, playing a game, or using an app in
-  full screen mode"; suppressed notifications are "redirected to Action
-  Center"
-  ([Focus: stay on task without distractions](https://support.microsoft.com/en-us/windows/focus-stay-on-task-without-distractions-in-windows-cbcc9ddb-8164-43fa-8919-b9a2af072382)).
-- Windows 11, Do not disturb: automatic conditions include "When playing a
-  game" and "When using an app in full-screen mode"; while on, "Other
-  notifications are sent directly to the notification center until you
-  turn it off"
-  ([Notifications and Do Not Disturb in Windows](https://support.microsoft.com/en-us/windows/experience/notifications-and-do-not-disturb-in-windows)).
-  **Unverified:** whether those two conditions are on by default on
-  Windows 11; the page lists them without stating defaults.
-
-What that means for the plugin, to be documented as a limitation rather
-than worked around:
-
-- the `notifyInGame` half of the value proposition is weaker on Windows:
-  during a fullscreen game the toast lands silently in the notification
-  center, and its click is inert once `snoretoast.exe` has returned
-- the outside-game half works as on Linux, plus a persistent, scrollable
-  history the Linux daemons mostly lack
-- **unverified:** what `snoretoast.exe` returns when the banner is
-  suppressed (TimedOut after the banner duration, or immediately). It
-  decides whether the wrapper can tell "suppressed" from "ignored" for the
-  log
-- users who want in-game banners can clear the rule under Settings >
-  System > Notifications; the README should say so and say nothing else
-
-### Backend branch points
-
-Already seamed on this branch; the Windows work fills them in:
-
-- `spawn_helper`: replace the refusal with the `ffi` spawn; write the
-  `.notify` file first
-- `install_helper`: materialize a per-OS asset list
-  (`tools/notify-action.ps1`, `tools/snoretoast.exe`). Skip the 2.5 MB
-  rewrite when the installed file already matches the asset byte for byte:
-  read both and compare the strings (`millennium.assets.read` already holds
-  the asset in memory; a 2.5 MB comparison per load is nothing next to the
-  write it saves). A size comparison is not enough: a revised script of the
-  same length would never be rewritten.
-- `on_load`: replace the "not implemented" error with the AUMID
-  registration and a `helper: <path>` line, so `tools/capture`'s grep holds
-- `shell_quote` stays POSIX-only and unused on Windows (the file transport
-  needs no quoting)
-- `TakeClick`/`TakeDevCommand`: unchanged; `os.remove` on Windows fails
-  while the writer still holds the file, which the temp-and-move write
-  rules out
-
-### Packaging
-
-- assets: add `tools/notify-action.ps1` and `tools/snoretoast.exe` to
-  `[assets] resources` in `millennium.toml`. `millennium.assets.read`
-  returns raw bytes and the backend writes in binary mode, so a packed
-  executable survives; **unverified** that starlight packs a binary asset
-  without mangling it (test: byte-compare after materialization, the same
-  check `tools/test-backend` runs for the sh helper)
-- the `.star` grows by about 2.5 MB; only the Windows load reads it
-- x64 only. Steam is 32-bit on Windows, but the helper is a separate process
-  and every supported Windows runs x64 binaries (natively or emulated)
-- binary provenance: no official build exists. Either build `v0.9.1` from
-  the KDE tarball in a Windows CI job (CMake + MSVC) and commit the
-  artifact with its checksum, or vendor `node-notifier`'s binary and record
-  its version. Ship `COPYING.LGPL` and a source link with it (LGPL-3.0)
-- **unverified:** SmartScreen and Defender behaviour for an unsigned
-  executable written by the Lua host and launched from it. The file has no
-  Mark-of-the-Web, so SmartScreen should not prompt; Defender may quarantine
-  a 2 MB unsigned binary, which shows as `-1` from the wrapper. A pinned
-  checksum in the log line helps a tester tell the cases apart
-- Windows Millennium version parity with the `.star` format (v3.5+):
-  **unverified**
-
-### Validation
-
-What a Windows tester runs, in order. Each step has a pass signal in
-`%LOCALAPPDATA%\steam-native-notify\plugin.log`.
-
-1. **Groundwork (this branch, no helper yet).** Build with
-   `bun run build` on Windows (starlight ships `starlight-win32-x64.exe`),
-   confirm the `.star` under `<steam>\millennium\plugins`, enable the
-   plugin, restart Steam. Expect `platform: windows runtime: C:\Users\...`
-   and the `not implemented on windows` error at load; then `hook
-   installed` and a `toast <name> -> {...}` line for any Steam toast. That
-   proves capture, replay stashing, and the ffi bridge on Windows before a
-   single line of delivery exists. Also confirms `pcall(require, "ffi")`
-   (add it to the load log for this step).
-2. **Spawn.** With the `ffi` spawn in place and the wrapper reduced to
-   `exit 0`: fire a toast, expect a `spawn:` line, and no console flash.
-   `Get-Process conhost` count before and after is the objective check.
-3. **Delivery.** Wrapper complete, SnoreToast self-registered (option 1):
-   `tools\fire.ps1 TestFriendOnline`, expect a banner. Then
-   `TestDownloadComplete 1073390` for library art, `TestFriendMessage` for a
-   CDN avatar, and a body with quotes, backslashes, and non-ASCII text.
-4. **Click.** Click the banner within 25 s: expect `click-bridge:
-   replay:<name>` and `replay: invoke ... returned without throwing`, and
-   Steam doing what its own toast click does. Click after the banner is
-   gone: expect nothing (phase 2 territory).
-5. **Branding.** Register the shortcut (option 2), restart Steam, repeat
-   step 3; the toast reads "Steam Notifications" with Steam's icon.
-6. **Focus Assist.** Launch a fullscreen game, fire a toast: expect no
-   banner, an entry in the notification center, and whatever exit code the
-   wrapper logs; record it in this file. Clear the rule, repeat.
-7. **Real event.** `steam://uninstall/1073390` then
-   `steam://install/1073390`, the only self-service real trigger.
-8. **Restart cycle.** Rebuild, restart Steam, confirm the helper is
-   rewritten only when its bytes changed.
-
-Tooling for the tester, all PowerShell, all writing the same JSON the Linux
-tools write:
-
-- `tools\fire.ps1 <TestMethod> [args]`, `-Server <type> <json>`,
-  `-Replay inspect|invoke`: writes `.dev-fire` under `%LOCALAPPDATA%`
-- `tools\capture.ps1`: the `.star` mtime versus Millennium's loader log
-  under `<steam>\millennium\logs`, then the same grep vocabulary over
-  `plugin.log`
-- Steam restart: `steam.exe -shutdown`, wait, relaunch; the "full restart
-  for any change" rule is assumed to hold on Windows (**unverified**)
-
-### Effort
-
-Estimates assume a Windows machine with Steam and Millennium, and one
-person. Without the machine, only the first item is possible.
-
-| item | estimate | notes |
-|---|---|---|
-| frontend: close Steam's toast only on `"ok"` | 0.5 d | shared with macOS; needs Linux live verification |
-| `ffi` spawn with `CREATE_NO_WINDOW`, `.notify` transport | 1 to 2 d | blocked on the `ffi` check |
-| `notify-action.ps1`: icon resolve, cache, prune, snoretoast, click file | 1 to 2 d | mirror of `tools/notify-action` |
-| AUMID shortcut registration and branding | 0.5 to 1 d | includes the icon question |
-| packaging: binary build or vendoring, assets, byte-compared materialization | 1 d | CI job belongs to whoever owns `.github/` |
-| `fire.ps1`, `capture.ps1` | 0.5 d | |
-| README and architecture updates, limitation text | 0.5 d | |
-| validation pass, steps 1 to 8 | 1 to 2 d | |
-
-Six to ten days end to end.
-
-### Risks
-
-- `ffi` disabled in Millennium's LuaJIT: no console-free spawn exists from
-  Lua; the work stalls on an upstream `utils.spawn`
-- SnoreToast binary provenance and antivirus reaction to an unsigned
-  executable launched by Steam's child process
-- Windows Steam's toast popups may not use the `notificationtoasts_` names
-  or the same fiber conventions; step 1 of validation finds out before any
-  delivery work is spent
-- the toast icon may not follow the shortcut's target; fallback is
-  SnoreToast's own icon or a bundled `.ico`
-- `Move-Item -Force` over a file the bridge is mid-read: the bridge polls at
-  1 s and reads whole files, so a torn read is a dropped click, not a wrong
-  one
-- Windows path length and codepage: every path the plugin builds stays
-  under `%LOCALAPPDATA%` and ASCII except the user name; the wrapper reads
-  the `.notify` file and `steam-dir` as UTF-8 explicitly
+1. `pcall(require, "ffi")` in the plugin backend -- the load log already
+   answers it. Missing: fall back to a resident helper (one console flash
+   per session) or an upstream utils.spawn; stop here.
+2. A protocol toast with no stub CLSID: click the banner, confirm the snn:
+   handler ran (`.click` appears). The whole click design rests on this
+   one experiment.
+3. The toast appears, branded "Steam" with the extracted icon
+   (registry-only AUMID).
+4. Library-cache art and a CDN avatar both render; an oversized JPEG
+   re-encodes rather than vanishing.
+5. Click -> `.click` -> bridge consumes -> `replay: invoke` in the log,
+   with Steam focused.
+6. hideSteamToast: Steam's own toast closes only after `Notify` answers
+   "ok"; on a failed spawn it stays open.
+7. Action Center: does the toast persist, and does a click there still
+   protocol-activate? Expected to need the stub-CLSID registration; if so
+   it is one more HKCU key in -Setup.
+8. Focus Assist on, game fullscreen: confirm suppression, then retest with
+   `scenario="urgent"`.
+9. `-Teardown` leaves no keys and no icon behind.
 
 ### Open questions
 
 - does `require("ffi")` work inside a Millennium plugin backend on Windows?
-- what does `snoretoast.exe` return when Focus Assist suppresses the banner,
-  and how long does it block?
-- does the toast take the shortcut target's icon (`steam.exe`) or the
-  registering process's?
-- does starlight pack a 2.5 MB binary asset intact, and does
-  `output_path = "auto"` land in `<steam>\millennium\plugins` on Windows?
-- is the `_popen` hang warning real on the current CRT? (only matters if
-  the `ffi` route fails)
-- `http.download` for both platforms: what is the measured stall per
-  notification, and is it acceptable on Linux?
-- phase 2: `snoretoast -application <exe>` launches a program when the
-  toast is activated after the process has exited. Pointing it at a tiny
-  script that writes `.click` would make notification-center clicks work
-  for the bridge's 120 s window, which Linux cannot offer. Needs the COM
-  activator from `-install`, and a look at what arguments it passes.
+- does a banner click protocol-activate with no stub CLSID registered?
+- does `Get-StartApps` show a Steam AUMID? (Not to borrow -- muting Steam
+  in Windows settings would then mute the plugin whose job is replacing
+  Steam's toasts -- but to know the namespace.)
+- what are the real local-image limits on current Windows 10/11; is the
+  190 KB re-encode threshold right?
+- Constrained Language Mode / WDAC machines kill the script route outright;
+  is that population worth a fallback?
+
+### Effort remaining
+
+| item | estimate |
+|---|---|
+| validation pass 1-9 on a Windows machine | 1 d |
+| fixes it surfaces (stub CLSID, image limits, quoting) | 0.5-1 d |
+| `fire.ps1` / `capture.ps1` tester tooling | 0.5 d |
+
+The implementation is shipped; a day or two with hardware stands between
+this section and dropping the EXPERIMENTAL mark.
