@@ -364,6 +364,107 @@ check("resolve-icon: missing absolute path falls back",
 check("resolve-icon: garbage falls back",
 	resolved_icon("not a url at all") == "steam")
 
+-- notify-action's library-cache lookup, per platform. HOME and the runtime
+-- directory move to a throwaway tree: the guesses run native first, then the
+-- Flatpak per-app directory, then the macOS data directory, and the steam-dir
+-- file the backend publishes beats every guess while it holds a library
+-- cache.
+local lc_h = io.popen("mktemp -d")
+local lc_home = lc_h:read("*l")
+lc_h:close()
+if lc_home and lc_home ~= "" then
+	local art_url = "https://steamloopback.host/assets/1073390/library_600x900.jpg?c=7"
+	local art_tail = "/appcache/librarycache/1073390/library_600x900.jpg"
+	local function place_art(dir)
+		io.popen("mkdir -p '" .. dir .. "/appcache/librarycache/1073390' && printf 'x' > '"
+			.. dir .. art_tail .. "'"):close()
+	end
+	local function resolved_under_home()
+		local h = io.popen("HOME='" .. lc_home .. "' XDG_CACHE_HOME='" .. lc_home .. "/cache' "
+			.. root .. "/tools/notify-action --resolve-icon '" .. art_url .. "'")
+		local out = h:read("*l")
+		h:close()
+		return out
+	end
+	local function publish_steam_dir(dir)
+		io.popen("mkdir -p '" .. lc_home .. "/cache/steam-native-notify' && printf '%s\\n' '" .. dir
+			.. "' > '" .. lc_home .. "/cache/steam-native-notify/steam-dir'"):close()
+	end
+	check("resolve-icon: no Steam directory anywhere falls back",
+		resolved_under_home() == "steam", tostring(resolved_under_home()))
+	local mac_steam = lc_home .. "/Library/Application Support/Steam"
+	place_art(mac_steam)
+	check("resolve-icon: macOS Application Support library cache",
+		resolved_under_home() == mac_steam .. art_tail, tostring(resolved_under_home()))
+	local flatpak_steam = lc_home .. "/.var/app/com.valvesoftware.Steam/.steam/steam"
+	place_art(flatpak_steam)
+	check("resolve-icon: Flatpak per-app library cache beats the macOS guess",
+		resolved_under_home() == flatpak_steam .. art_tail, tostring(resolved_under_home()))
+	local flatpak_data = lc_home .. "/.var/app/com.valvesoftware.Steam/.local/share/Steam"
+	place_art(flatpak_data)
+	check("resolve-icon: Flatpak per-app .local/share/Steam beats its .steam/steam",
+		resolved_under_home() == flatpak_data .. art_tail, tostring(resolved_under_home()))
+	local native_steam = lc_home .. "/.local/share/Steam"
+	place_art(native_steam)
+	check("resolve-icon: native library cache beats the Flatpak guesses",
+		resolved_under_home() == native_steam .. art_tail, tostring(resolved_under_home()))
+	local published_steam = lc_home .. "/elsewhere/Steam"
+	place_art(published_steam)
+	publish_steam_dir(published_steam)
+	check("resolve-icon: the published steam-dir beats every guess",
+		resolved_under_home() == published_steam .. art_tail, tostring(resolved_under_home()))
+	publish_steam_dir(lc_home .. "/nowhere/Steam")
+	check("resolve-icon: a published steam-dir without a library cache falls through",
+		resolved_under_home() == native_steam .. art_tail, tostring(resolved_under_home()))
+	io.popen("rm -rf '" .. lc_home .. "'"):close()
+else
+	print("  skip library-cache candidates (mktemp failed)")
+end
+
+-- Unsupported platforms are refused in plugin.log, never silently: uname is
+-- shimmed to answer Darwin, and a shimmed notify-send records whether
+-- delivery was attempted. Then, on a Linux PATH without notify-send at all
+-- (only the shims the gate itself needs), the missing tool is named.
+local gate_h = io.popen("mktemp -d")
+local gate_dir = gate_h:read("*l")
+gate_h:close()
+if gate_dir and gate_dir ~= "" then
+	local u = assert(io.open(gate_dir .. "/uname", "w"))
+	u:write("#!/bin/sh\necho Darwin\n")
+	u:close()
+	local ns = assert(io.open(gate_dir .. "/notify-send", "w"))
+	ns:write("#!/bin/sh\nprintf 'called' > " .. gate_dir .. "/sent\nexit 0\n")
+	ns:close()
+	io.popen("chmod +x '" .. gate_dir .. "/uname' '" .. gate_dir .. "/notify-send'"):close()
+	io.popen("mkdir -p '" .. gate_dir .. "/steam-native-notify'"):close()
+	local status = io.popen("XDG_CACHE_HOME='" .. gate_dir .. "' PATH='" .. gate_dir .. "':\"$PATH\" "
+		.. root .. "/tools/notify-action 'T' 'b' '' '' >/dev/null 2>&1; echo $?"):read("*l")
+	local gate_log = slurp(gate_dir .. "/steam-native-notify/plugin.log") or "(no log)"
+	check("macos helper: refused in plugin.log",
+		gate_log:find("notify-action: unsupported platform: macos", 1, true) ~= nil, gate_log)
+	check("macos helper: exits non-zero", status == "1", tostring(status))
+	check("macos helper: never calls notify-send", slurp(gate_dir .. "/sent") == nil)
+
+	-- resolve-icon stays usable there: the seams run before the gate.
+	local seam = io.popen("XDG_CACHE_HOME='" .. gate_dir .. "' PATH='" .. gate_dir .. "':\"$PATH\" "
+		.. root .. "/tools/notify-action --resolve-icon 'not a url'"):read("*l")
+	check("macos helper: the resolve-icon seam still answers", seam == "steam", tostring(seam))
+
+	local bare = gate_dir .. "/bare"
+	io.popen("mkdir -p '" .. bare .. "' && printf '#!/bin/sh\\necho Linux\\n' > '" .. bare
+		.. "/uname' && chmod +x '" .. bare .. "/uname' && ln -s \"$(command -v date)\" '" .. bare .. "/date'"):close()
+	io.popen("rm -f '" .. gate_dir .. "/steam-native-notify/plugin.log'"):close()
+	status = io.popen("XDG_CACHE_HOME='" .. gate_dir .. "' PATH='" .. bare .. "' "
+		.. root .. "/tools/notify-action 'T' 'b' '' '' >/dev/null 2>&1; echo $?"):read("*l")
+	gate_log = slurp(gate_dir .. "/steam-native-notify/plugin.log") or "(no log)"
+	check("helper without notify-send: refused in plugin.log",
+		gate_log:find("notify-action: notify-send not found", 1, true) ~= nil, gate_log)
+	check("helper without notify-send: exits non-zero", status == "1", tostring(status))
+	io.popen("rm -rf '" .. gate_dir .. "'"):close()
+else
+	print("  skip platform gate (mktemp failed)")
+end
+
 -- Delivery retry: at login the helper can run before the session's daemon
 -- owns the bus name, and notify-send fails fast. A PATH shim fails twice and
 -- succeeds on the third call; the helper must retry through the failures and
@@ -543,6 +644,27 @@ exit 0
 		sent_args)
 	check("delivery carries the desktop-entry hint",
 		sent_args:find("string:desktop-entry:steam", 1, true) ~= nil, sent_args)
+
+	-- Flatpak Steam exports com.valvesoftware.Steam.desktop instead: that is
+	-- the hint when the per-app directory is the Steam found (host side), or
+	-- when this runs inside the sandbox (FLATPAK_ID), whatever HOME holds.
+	local flat_home = iconargs_dir .. "/flathome"
+	io.popen("mkdir -p '" .. flat_home .. "/.var/app/com.valvesoftware.Steam/.local/share/Steam/appcache/librarycache'"):close()
+	io.popen("HOME='" .. flat_home .. "' XDG_CACHE_HOME='" .. iconargs_dir .. "' PATH='" .. iconargs_dir .. "':\"$PATH\" " .. root
+		.. "/tools/notify-action 'T' 'b' '' ''; echo done"):read("*a")
+	af = io.open(iconargs_dir .. "/args", "r")
+	sent_args = af and af:read("*a") or "(no args)"
+	if af then af:close() end
+	check("Flatpak Steam found on the host names its desktop entry",
+		sent_args:find("string:desktop-entry:com.valvesoftware.Steam\n", 1, true) ~= nil, sent_args)
+	io.popen("FLATPAK_ID=com.valvesoftware.Steam HOME='" .. iconargs_dir .. "/nohome' XDG_CACHE_HOME='" .. iconargs_dir
+		.. "' PATH='" .. iconargs_dir .. "':\"$PATH\" " .. root
+		.. "/tools/notify-action 'T' 'b' '' ''; echo done"):read("*a")
+	af = io.open(iconargs_dir .. "/args", "r")
+	sent_args = af and af:read("*a") or "(no args)"
+	if af then af:close() end
+	check("inside the Steam sandbox the desktop entry follows FLATPAK_ID",
+		sent_args:find("string:desktop-entry:com.valvesoftware.Steam\n", 1, true) ~= nil, sent_args)
 	io.popen("rm -rf '" .. iconargs_dir .. "'"):close()
 else
 	print("  skip icon-args (mktemp failed)")
