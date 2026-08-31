@@ -55,6 +55,8 @@ end
 
 --- POSIX single-quote escaping: end the quote, add an escaped quote, reopen.
 --- Everything else inside single quotes is literal, so this is sufficient.
+--- POSIX only: cmd.exe and PowerShell quote differently, and the Windows
+--- branch of spawn_helper brings its own (docs/windows-plan.md).
 local function shell_quote(value)
     local escaped = tostring(value):gsub("'", "'\\''")
     return "'" .. escaped .. "'"
@@ -76,6 +78,36 @@ local function install_helper()
     handle:write(content)
     handle:close()
     return HELPER
+end
+
+--- Hand the five delivery slots to the platform's helper, detached, and say
+--- whether anything was spawned. The one seam that knows how a process
+--- starts on each OS; Notify above it is OS-blind.
+---
+--- POSIX: `sh <helper> ... >/dev/null 2>&1 &`. Backgrounded because the
+--- helper blocks for the popup's lifetime, and this backend's single event
+--- loop must keep answering the frontend's polls meanwhile.
+---
+--- Windows: not implemented. There is no sh and no `&`; os.execute is the C
+--- runtime's system(), which runs cmd.exe, and from Millennium's
+--- GUI-subsystem Lua host that allocates a console window per notification.
+--- The design (a PowerShell wrapper around snoretoast.exe, started without a
+--- console) is docs/windows-plan.md. Until it lands this logs and returns
+--- false, so a Windows install fails in the log rather than in silence.
+local function spawn_helper(title, body, raw_image, route, ingame)
+    if IS_WINDOWS then
+        log_line("error", "unsupported platform: windows delivery is not implemented, notification dropped")
+        return false
+    end
+    local command = table.concat({
+        "sh",
+        shell_quote(HELPER),
+        shell_quote(title), shell_quote(body), shell_quote(raw_image),
+        shell_quote(route), shell_quote(ingame),
+        ">/dev/null 2>&1 &",
+    }, " ")
+    os.execute(command)
+    return true
 end
 
 --- Positional over the ffi bridge: title, body, image, route, ingame -- the
@@ -106,15 +138,9 @@ function Notify(title, body, image, route, ingame)
     -- five positional arguments are a contract shared with tools/notify-action
     -- and tools/test-backend. A missing helper was already reported loudly at
     -- load; delivering without it would mean a second, untested notify-send.
-    local command = table.concat({
-        "sh",
-        shell_quote(HELPER),
-        shell_quote(title), shell_quote(body), shell_quote(raw_image),
-        shell_quote(route), shell_quote(ingame),
-        ">/dev/null 2>&1 &",
-    }, " ")
-
-    os.execute(command)
+    if not spawn_helper(title, body, raw_image, route, ingame) then
+        return "unsupported"
+    end
     return "ok"
 end
 
@@ -251,12 +277,21 @@ local function on_load()
 
     migrate_legacy_settings()
 
-    local helper, err = install_helper()
-    if helper then
-        log_line("info", "helper: " .. helper)
+    -- The POSIX helper is useless on Windows (it is sh), so it is not written
+    -- there; the Windows helper is a different asset that arrives with the
+    -- Windows spawn branch. Said once at load, and again per dropped
+    -- notification by spawn_helper, so neither end is ever silent.
+    if IS_WINDOWS then
+        log_line("error", "desktop delivery is not implemented on windows"
+            .. " -- notifications will not be delivered (docs/windows-plan.md)")
     else
-        log_line("error", "helper install FAILED: " .. tostring(err)
-            .. " -- notifications will not be delivered")
+        local helper, err = install_helper()
+        if helper then
+            log_line("info", "helper: " .. helper)
+        else
+            log_line("error", "helper install FAILED: " .. tostring(err)
+                .. " -- notifications will not be delivered")
+        end
     end
 
     millennium.ready()

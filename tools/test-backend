@@ -528,6 +528,84 @@ else
 	print("  skip stamped click (mktemp failed)")
 end
 
+-- ---------------------------------------------------------------------------
+-- The Windows branch. main.lua reads the platform off package.config's first
+-- character at load, so the module is loaded a second time under a Windows
+-- configuration: the runtime directory moves under %LOCALAPPDATA%, no helper
+-- is materialized, and Notify refuses in the log instead of spawning `sh`.
+-- Backslashes are ordinary filename characters on Linux, so every joined
+-- path is exercised for real inside tmp_cache (as entries whose names
+-- contain backslashes). Globals from the second load replace the first's;
+-- nothing below needs the POSIX ones.
+-- ---------------------------------------------------------------------------
+local posix_config = package.config
+package.config = "\\\n;\n?\n!\n-\n"
+local win_local = tmp_cache .. "/winlocal"
+os.getenv = function(name)
+	if name == "LOCALAPPDATA" then return win_local end
+	if name == "XDG_CACHE_HOME" then return tmp_cache end
+	return real_getenv(name)
+end
+io.popen("mkdir -p '" .. win_local .. "'"):close()
+local win_runtime = win_local .. "\\steam-native-notify"
+
+logged = {}
+executed = {}
+local win_plugin = dofile(root .. "/backend/main.lua")
+ok, err = pcall(win_plugin.on_load)
+check("windows: on_load runs", ok, err)
+
+local win_platform, win_unsupported, win_helper = false, false, false
+for _, entry in ipairs(logged) do
+	if entry[2]:find("platform: windows", 1, true) then win_platform = true end
+	if entry[1] == "error" and entry[2]:find("not implemented on windows", 1, true) then win_unsupported = true end
+	if entry[2]:find("helper: ", 1, true) then win_helper = true end
+end
+check("windows: load names the platform", win_platform)
+check("windows: load reports delivery unsupported as an error", win_unsupported)
+check("windows: no helper is materialized", not win_helper)
+check("windows: runtime directory lives under LOCALAPPDATA",
+	slurp(win_runtime .. "\\plugin.log") ~= nil
+		and slurp(win_runtime .. "\\plugin.log"):find("platform: windows runtime: " .. win_runtime, 1, true) ~= nil,
+	tostring(slurp(win_runtime .. "\\plugin.log")))
+
+-- Notify must not spawn anything, must say so, and must not throw.
+local win_result
+ok, win_result = pcall(Notify, "Download Complete", "Aircar is ready", "", "", "")
+check("windows: Notify runs", ok, win_result)
+check("windows: Notify spawns nothing", #executed == 0, tostring(#executed) .. " commands")
+check("windows: Notify reports unsupported", win_result == "unsupported", tostring(win_result))
+local win_dropped = false
+for _, entry in ipairs(logged) do
+	if entry[1] == "error" and entry[2]:find("unsupported platform", 1, true) then win_dropped = true end
+end
+check("windows: dropped notification is logged", win_dropped)
+
+-- The click and dev-command handoffs join with the platform separator.
+local win_click = assert(io.open(win_runtime .. "\\.click", "w"))
+win_click:write("1756500000|replay:notificationtoasts_3_desktop")
+win_click:close()
+ok, taken = pcall(TakeClick)
+check("windows: TakeClick reads the separator-joined path",
+	ok and taken == "1756500000|replay:notificationtoasts_3_desktop", tostring(taken))
+local win_fire = assert(io.open(win_runtime .. "\\.dev-fire", "w"))
+win_fire:write('{"call":"TestFriendOnline","args":[]}')
+win_fire:close()
+ok, taken = pcall(TakeDevCommand)
+check("windows: TakeDevCommand reads the separator-joined path",
+	ok and taken:find("TestFriendOnline") ~= nil, tostring(taken))
+
+-- Identity: only millennium.steam_path is consulted (no ~/.steam guesses),
+-- joined with backslashes under the stub's trailing-slash answer.
+local win_vdf = assert(io.open(steam_dir .. "\\config\\loginusers.vdf", "w"))
+win_vdf:write('"users"\n{\n\t"76561198000000003"\n\t{\n\t\t"MostRecent"\t\t"1"\n\t}\n}\n')
+win_vdf:close()
+ok, id_json = pcall(Identity)
+check("windows: Identity reads loginusers.vdf under steam_path",
+	ok and id_json == '{"steamid64":"76561198000000003"}', tostring(id_json))
+
+package.config = posix_config
+
 os.execute = real_execute
 os.getenv = real_getenv
 if tmp_cache:find("^/tmp/") then os.execute("rm -rf '" .. tmp_cache .. "'") end
