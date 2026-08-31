@@ -36,9 +36,14 @@ end
 -- so a stub installed afterwards would never be seen. assets.read serves the
 -- real helper from the repo, standing in for the copy packed into the .star.
 local stored = {}
+-- steam_path answers with a throwaway Steam directory; a test that needs a
+-- loginusers.vdf writes one there. Empty by default, so Identity falls
+-- through to the machine's real candidates exactly as before.
+local steam_dir = tmp_cache .. "/steam"
 package.preload["millennium"] = function()
 	return {
 		ready = function() end,
+		steam_path = function() return steam_dir .. "/" end,
 		config = {
 			get = function(k) return stored[k] end,
 			set = function(k, v) stored[k] = v end,
@@ -140,6 +145,25 @@ end
 check("helper materialized verbatim",
 	slurp(tmp_cache .. "/steam-native-notify/notify-action") == slurp(root .. "/tools/notify-action"))
 
+-- A write that fails (disk full, a quota) must be reported as a failed
+-- install, not as a helper at its path: io.open is shimmed to hand the
+-- helper's own open a handle whose write refuses.
+local real_open = io.open
+io.open = function(path, mode)
+	if mode == "wb" and path:find("/notify%-action$") then
+		return { write = function() return nil, "disk full" end, close = function() return true end }
+	end
+	return real_open(path, mode)
+end
+logged = {}
+pcall(plugin.on_load)
+io.open = real_open
+local short_write = false
+for _, entry in ipairs(logged) do
+	if entry[1] == "error" and entry[2]:find("helper install FAILED: disk full", 1, true) then short_write = true end
+end
+check("a failed helper write is reported as a failed install", short_write)
+
 -- A notification with no route: the download-complete shape.
 executed = {}
 ok, err = pcall(Notify, "Download Complete", "Aircar is ready", "https://steamloopback.host/assets/1073390/x.jpg?c=1", nil, nil)
@@ -212,6 +236,75 @@ check("Identity runs", ok, id_json)
 check("Identity returns JSON", type(id_json) == "string" and id_json:sub(1, 1) == "{", tostring(id_json))
 if type(id_json) == "string" and id_json:find("steamid64") then
 	check("Identity id is a steamid64", id_json:find('"7656119%d%d%d%d%d%d%d%d%d%d"') ~= nil, id_json)
+end
+
+-- With a loginusers.vdf under Millennium's steam_path, that file wins over
+-- the hard-coded locations (steam_path answers with a trailing slash, as
+-- Millennium's Linux build does). Two users, MostRecent on the second.
+io.popen("mkdir -p '" .. steam_dir .. "/config'"):close()
+local vdf = assert(io.open(steam_dir .. "/config/loginusers.vdf", "w"))
+vdf:write([[
+"users"
+{
+	"76561198000000001"
+	{
+		"AccountName"		"first"
+		"MostRecent"		"0"
+	}
+	"76561198000000002"
+	{
+		"AccountName"		"second"
+		"MostRecent"		"1"
+	}
+}
+]])
+vdf:close()
+ok, id_json = pcall(Identity)
+check("Identity reads loginusers.vdf under millennium.steam_path first",
+	ok and id_json == '{"steamid64":"76561198000000002"}', tostring(id_json))
+os.remove(steam_dir .. "/config/loginusers.vdf")
+
+-- The same steam_path answer is published for the helper at load, trimmed
+-- of its trailing slash, as one line in the runtime directory.
+check("load publishes steam_path for the helper",
+	slurp(tmp_cache .. "/steam-native-notify/steam-dir") == steam_dir .. "\n",
+	tostring(slurp(tmp_cache .. "/steam-native-notify/steam-dir")))
+
+-- With nothing under steam_path, the Linux guesses run native first
+-- (~/.steam/steam, then ~/.local/share/Steam), then Steam's Flatpak per-app
+-- directory as the host sees it. HOME moves to a throwaway directory so the
+-- machine's real loginusers.vdf stays out of it.
+local guess_home = tmp_cache .. "/home"
+os.getenv = function(name)
+	if name == "XDG_CACHE_HOME" then return tmp_cache end
+	if name == "HOME" then return guess_home end
+	return real_getenv(name)
+end
+local function write_loginusers(dir, id)
+	io.popen("mkdir -p '" .. dir .. "/config'"):close()
+	local f = assert(io.open(dir .. "/config/loginusers.vdf", "w"))
+	f:write('"users"\n{\n\t"' .. id .. '"\n\t{\n\t\t"MostRecent"\t\t"1"\n\t}\n}\n')
+	f:close()
+end
+write_loginusers(guess_home .. "/.var/app/com.valvesoftware.Steam/.steam/steam", "76561198000000011")
+ok, id_json = pcall(Identity)
+check("Identity falls back to the Flatpak per-app ~/.steam/steam",
+	ok and id_json == '{"steamid64":"76561198000000011"}', tostring(id_json))
+write_loginusers(guess_home .. "/.var/app/com.valvesoftware.Steam/.local/share/Steam", "76561198000000012")
+ok, id_json = pcall(Identity)
+check("Identity prefers the Flatpak per-app ~/.local/share/Steam",
+	ok and id_json == '{"steamid64":"76561198000000012"}', tostring(id_json))
+write_loginusers(guess_home .. "/.local/share/Steam", "76561198000000013")
+ok, id_json = pcall(Identity)
+check("Identity prefers a native ~/.local/share/Steam over the Flatpak ones",
+	ok and id_json == '{"steamid64":"76561198000000013"}', tostring(id_json))
+write_loginusers(guess_home .. "/.steam/steam", "76561198000000014")
+ok, id_json = pcall(Identity)
+check("Identity prefers a native ~/.steam/steam over everything but steam_path",
+	ok and id_json == '{"steamid64":"76561198000000014"}', tostring(id_json))
+os.getenv = function(name)
+	if name == "XDG_CACHE_HOME" then return tmp_cache end
+	return real_getenv(name)
 end
 
 -- TakeDevCommand: consume-once semantics against the runtime cache directory
@@ -289,6 +382,107 @@ check("resolve-icon: missing absolute path falls back",
 	resolved_icon("/nonexistent/steam-native-notify/icon.png") == "steam")
 check("resolve-icon: garbage falls back",
 	resolved_icon("not a url at all") == "steam")
+
+-- notify-action's library-cache lookup, per platform. HOME and the runtime
+-- directory move to a throwaway tree: the guesses run native first, then the
+-- Flatpak per-app directory, then the macOS data directory, and the steam-dir
+-- file the backend publishes beats every guess while it holds a library
+-- cache.
+local lc_h = io.popen("mktemp -d")
+local lc_home = lc_h:read("*l")
+lc_h:close()
+if lc_home and lc_home ~= "" then
+	local art_url = "https://steamloopback.host/assets/1073390/library_600x900.jpg?c=7"
+	local art_tail = "/appcache/librarycache/1073390/library_600x900.jpg"
+	local function place_art(dir)
+		io.popen("mkdir -p '" .. dir .. "/appcache/librarycache/1073390' && printf 'x' > '"
+			.. dir .. art_tail .. "'"):close()
+	end
+	local function resolved_under_home()
+		local h = io.popen("HOME='" .. lc_home .. "' XDG_CACHE_HOME='" .. lc_home .. "/cache' "
+			.. root .. "/tools/notify-action --resolve-icon '" .. art_url .. "'")
+		local out = h:read("*l")
+		h:close()
+		return out
+	end
+	local function publish_steam_dir(dir)
+		io.popen("mkdir -p '" .. lc_home .. "/cache/steam-native-notify' && printf '%s\\n' '" .. dir
+			.. "' > '" .. lc_home .. "/cache/steam-native-notify/steam-dir'"):close()
+	end
+	check("resolve-icon: no Steam directory anywhere falls back",
+		resolved_under_home() == "steam", tostring(resolved_under_home()))
+	local mac_steam = lc_home .. "/Library/Application Support/Steam"
+	place_art(mac_steam)
+	check("resolve-icon: macOS Application Support library cache",
+		resolved_under_home() == mac_steam .. art_tail, tostring(resolved_under_home()))
+	local flatpak_steam = lc_home .. "/.var/app/com.valvesoftware.Steam/.steam/steam"
+	place_art(flatpak_steam)
+	check("resolve-icon: Flatpak per-app library cache beats the macOS guess",
+		resolved_under_home() == flatpak_steam .. art_tail, tostring(resolved_under_home()))
+	local flatpak_data = lc_home .. "/.var/app/com.valvesoftware.Steam/.local/share/Steam"
+	place_art(flatpak_data)
+	check("resolve-icon: Flatpak per-app .local/share/Steam beats its .steam/steam",
+		resolved_under_home() == flatpak_data .. art_tail, tostring(resolved_under_home()))
+	local native_steam = lc_home .. "/.local/share/Steam"
+	place_art(native_steam)
+	check("resolve-icon: native library cache beats the Flatpak guesses",
+		resolved_under_home() == native_steam .. art_tail, tostring(resolved_under_home()))
+	local published_steam = lc_home .. "/elsewhere/Steam"
+	place_art(published_steam)
+	publish_steam_dir(published_steam)
+	check("resolve-icon: the published steam-dir beats every guess",
+		resolved_under_home() == published_steam .. art_tail, tostring(resolved_under_home()))
+	publish_steam_dir(lc_home .. "/nowhere/Steam")
+	check("resolve-icon: a published steam-dir without a library cache falls through",
+		resolved_under_home() == native_steam .. art_tail, tostring(resolved_under_home()))
+	io.popen("rm -rf '" .. lc_home .. "'"):close()
+else
+	print("  skip library-cache candidates (mktemp failed)")
+end
+
+-- Unsupported platforms are refused in plugin.log, never silently: uname is
+-- shimmed to answer Darwin, and a shimmed notify-send records whether
+-- delivery was attempted. Then, on a Linux PATH without notify-send at all
+-- (only the shims the gate itself needs), the missing tool is named.
+local gate_h = io.popen("mktemp -d")
+local gate_dir = gate_h:read("*l")
+gate_h:close()
+if gate_dir and gate_dir ~= "" then
+	local u = assert(io.open(gate_dir .. "/uname", "w"))
+	u:write("#!/bin/sh\necho Darwin\n")
+	u:close()
+	local ns = assert(io.open(gate_dir .. "/notify-send", "w"))
+	ns:write("#!/bin/sh\nprintf 'called' > " .. gate_dir .. "/sent\nexit 0\n")
+	ns:close()
+	io.popen("chmod +x '" .. gate_dir .. "/uname' '" .. gate_dir .. "/notify-send'"):close()
+	io.popen("mkdir -p '" .. gate_dir .. "/steam-native-notify'"):close()
+	local status = io.popen("XDG_CACHE_HOME='" .. gate_dir .. "' PATH='" .. gate_dir .. "':\"$PATH\" "
+		.. root .. "/tools/notify-action 'T' 'b' '' '' >/dev/null 2>&1; echo $?"):read("*l")
+	local gate_log = slurp(gate_dir .. "/steam-native-notify/plugin.log") or "(no log)"
+	check("macos helper: refused in plugin.log",
+		gate_log:find("notify-action: unsupported platform: macos", 1, true) ~= nil, gate_log)
+	check("macos helper: exits non-zero", status == "1", tostring(status))
+	check("macos helper: never calls notify-send", slurp(gate_dir .. "/sent") == nil)
+
+	-- resolve-icon stays usable there: the seams run before the gate.
+	local seam = io.popen("XDG_CACHE_HOME='" .. gate_dir .. "' PATH='" .. gate_dir .. "':\"$PATH\" "
+		.. root .. "/tools/notify-action --resolve-icon 'not a url'"):read("*l")
+	check("macos helper: the resolve-icon seam still answers", seam == "steam", tostring(seam))
+
+	local bare = gate_dir .. "/bare"
+	io.popen("mkdir -p '" .. bare .. "' && printf '#!/bin/sh\\necho Linux\\n' > '" .. bare
+		.. "/uname' && chmod +x '" .. bare .. "/uname' && ln -s \"$(command -v date)\" '" .. bare .. "/date'"):close()
+	io.popen("rm -f '" .. gate_dir .. "/steam-native-notify/plugin.log'"):close()
+	status = io.popen("XDG_CACHE_HOME='" .. gate_dir .. "' PATH='" .. bare .. "' "
+		.. root .. "/tools/notify-action 'T' 'b' '' '' >/dev/null 2>&1; echo $?"):read("*l")
+	gate_log = slurp(gate_dir .. "/steam-native-notify/plugin.log") or "(no log)"
+	check("helper without notify-send: refused in plugin.log",
+		gate_log:find("notify-action: notify-send not found", 1, true) ~= nil, gate_log)
+	check("helper without notify-send: exits non-zero", status == "1", tostring(status))
+	io.popen("rm -rf '" .. gate_dir .. "'"):close()
+else
+	print("  skip platform gate (mktemp failed)")
+end
 
 -- Delivery retry: at login the helper can run before the session's daemon
 -- owns the bus name, and notify-send fails fast. A PATH shim fails twice and
@@ -469,6 +663,27 @@ exit 0
 		sent_args)
 	check("delivery carries the desktop-entry hint",
 		sent_args:find("string:desktop-entry:steam", 1, true) ~= nil, sent_args)
+
+	-- Flatpak Steam exports com.valvesoftware.Steam.desktop instead: that is
+	-- the hint when the per-app directory is the Steam found (host side), or
+	-- when this runs inside the sandbox (FLATPAK_ID), whatever HOME holds.
+	local flat_home = iconargs_dir .. "/flathome"
+	io.popen("mkdir -p '" .. flat_home .. "/.var/app/com.valvesoftware.Steam/.local/share/Steam/appcache/librarycache'"):close()
+	io.popen("HOME='" .. flat_home .. "' XDG_CACHE_HOME='" .. iconargs_dir .. "' PATH='" .. iconargs_dir .. "':\"$PATH\" " .. root
+		.. "/tools/notify-action 'T' 'b' '' ''; echo done"):read("*a")
+	af = io.open(iconargs_dir .. "/args", "r")
+	sent_args = af and af:read("*a") or "(no args)"
+	if af then af:close() end
+	check("Flatpak Steam found on the host names its desktop entry",
+		sent_args:find("string:desktop-entry:com.valvesoftware.Steam\n", 1, true) ~= nil, sent_args)
+	io.popen("FLATPAK_ID=com.valvesoftware.Steam HOME='" .. iconargs_dir .. "/nohome' XDG_CACHE_HOME='" .. iconargs_dir
+		.. "' PATH='" .. iconargs_dir .. "':\"$PATH\" " .. root
+		.. "/tools/notify-action 'T' 'b' '' ''; echo done"):read("*a")
+	af = io.open(iconargs_dir .. "/args", "r")
+	sent_args = af and af:read("*a") or "(no args)"
+	if af then af:close() end
+	check("inside the Steam sandbox the desktop entry follows FLATPAK_ID",
+		sent_args:find("string:desktop-entry:com.valvesoftware.Steam\n", 1, true) ~= nil, sent_args)
 	io.popen("rm -rf '" .. iconargs_dir .. "'"):close()
 else
 	print("  skip icon-args (mktemp failed)")
@@ -496,6 +711,159 @@ if click_dir and click_dir ~= "" then
 else
 	print("  skip stamped click (mktemp failed)")
 end
+
+-- ---------------------------------------------------------------------------
+-- The Windows branch. main.lua reads the platform off package.config's first
+-- character at load, so the module is loaded a second time under a Windows
+-- configuration: the runtime directory moves under %LOCALAPPDATA%, no helper
+-- is materialized, and Notify refuses in the log instead of spawning `sh`.
+-- Backslashes are ordinary filename characters on Linux, so every joined
+-- path is exercised for real inside tmp_cache (as entries whose names
+-- contain backslashes). Globals from the second load replace the first's;
+-- nothing below needs the POSIX ones.
+-- ---------------------------------------------------------------------------
+local posix_config = package.config
+package.config = "\\\n;\n?\n!\n-\n"
+local win_local = tmp_cache .. "/winlocal"
+os.getenv = function(name)
+	if name == "LOCALAPPDATA" then return win_local end
+	if name == "XDG_CACHE_HOME" then return tmp_cache end
+	return real_getenv(name)
+end
+io.popen("mkdir -p '" .. win_local .. "'"):close()
+local win_runtime = win_local .. "\\steam-native-notify"
+
+logged = {}
+executed = {}
+local win_plugin = dofile(root .. "/backend/main.lua")
+ok, err = pcall(win_plugin.on_load)
+check("windows: on_load runs", ok, err)
+
+local win_platform, win_unsupported, win_helper = false, false, false
+for _, entry in ipairs(logged) do
+	if entry[2]:find("platform: windows", 1, true) then win_platform = true end
+	if entry[1] == "error" and entry[2]:find("not implemented on windows", 1, true) then win_unsupported = true end
+	if entry[2]:find("helper: ", 1, true) then win_helper = true end
+end
+check("windows: load names the platform", win_platform)
+check("windows: load reports delivery unsupported as an error", win_unsupported)
+check("windows: no helper is materialized", not win_helper)
+check("windows: runtime directory lives under LOCALAPPDATA",
+	slurp(win_runtime .. "\\plugin.log") ~= nil
+		and slurp(win_runtime .. "\\plugin.log"):find("platform: windows runtime: " .. win_runtime, 1, true) ~= nil,
+	tostring(slurp(win_runtime .. "\\plugin.log")))
+
+-- Notify must not spawn anything, must say so, and must not throw.
+local win_result
+ok, win_result = pcall(Notify, "Download Complete", "Aircar is ready", "", "", "")
+check("windows: Notify runs", ok, win_result)
+check("windows: Notify spawns nothing", #executed == 0, tostring(#executed) .. " commands")
+check("windows: Notify reports unsupported", win_result == "unsupported", tostring(win_result))
+local win_dropped = false
+for _, entry in ipairs(logged) do
+	if entry[1] == "error" and entry[2]:find("unsupported platform", 1, true) then win_dropped = true end
+end
+check("windows: dropped notification is logged", win_dropped)
+
+-- The click and dev-command handoffs join with the platform separator.
+local win_click = assert(io.open(win_runtime .. "\\.click", "w"))
+win_click:write("1756500000|replay:notificationtoasts_3_desktop")
+win_click:close()
+ok, taken = pcall(TakeClick)
+check("windows: TakeClick reads the separator-joined path",
+	ok and taken == "1756500000|replay:notificationtoasts_3_desktop", tostring(taken))
+local win_fire = assert(io.open(win_runtime .. "\\.dev-fire", "w"))
+win_fire:write('{"call":"TestFriendOnline","args":[]}')
+win_fire:close()
+ok, taken = pcall(TakeDevCommand)
+check("windows: TakeDevCommand reads the separator-joined path",
+	ok and taken:find("TestFriendOnline") ~= nil, tostring(taken))
+
+-- Identity: only millennium.steam_path is consulted (no ~/.steam guesses),
+-- joined with backslashes under the stub's trailing-slash answer.
+local win_vdf = assert(io.open(steam_dir .. "\\config\\loginusers.vdf", "w"))
+win_vdf:write('"users"\n{\n\t"76561198000000003"\n\t{\n\t\t"MostRecent"\t\t"1"\n\t}\n}\n')
+win_vdf:close()
+ok, id_json = pcall(Identity)
+check("windows: Identity reads loginusers.vdf under steam_path",
+	ok and id_json == '{"steamid64":"76561198000000003"}', tostring(id_json))
+
+package.config = posix_config
+
+-- ---------------------------------------------------------------------------
+-- The macOS branch. package.config says "/" there too, so main.lua asks
+-- LuaJIT's jit.os; this runner is PUC Lua, so a jit table is planted for a
+-- third load. HOME moves to a throwaway directory: the runtime directory
+-- lands under ~/Library/Caches, delivery is refused the way Windows is (the
+-- sh helper has no notify-send to call), and Identity reads
+-- ~/Library/Application Support/Steam when steam_path answers the app
+-- bundle's MacOS directory, which holds no config/.
+-- ---------------------------------------------------------------------------
+local mac_home = tmp_cache .. "/machome"
+io.popen("mkdir -p '" .. mac_home .. "'"):close()
+local mac_support = mac_home .. "/Library/Application Support/Steam"
+steam_dir = mac_support .. "/Steam.AppBundle/Steam/Contents/MacOS"
+jit = { os = "OSX" }
+os.getenv = function(name)
+	if name == "HOME" then return mac_home end
+	if name == "XDG_CACHE_HOME" then return nil end
+	return real_getenv(name)
+end
+local mac_runtime = mac_home .. "/Library/Caches/steam-native-notify"
+
+logged = {}
+executed = {}
+local mac_plugin = dofile(root .. "/backend/main.lua")
+ok, err = pcall(mac_plugin.on_load)
+check("macos: on_load runs", ok, err)
+
+local mac_platform, mac_unsupported, mac_helper = false, false, false
+for _, entry in ipairs(logged) do
+	if entry[2]:find("platform: macos", 1, true) then mac_platform = true end
+	if entry[1] == "error" and entry[2]:find("not implemented on macos", 1, true) then mac_unsupported = true end
+	if entry[2]:find("helper: ", 1, true) then mac_helper = true end
+end
+check("macos: load names the platform", mac_platform)
+check("macos: load reports delivery unsupported as an error", mac_unsupported)
+check("macos: no helper is materialized", not mac_helper)
+check("macos: runtime directory lives under Library/Caches",
+	slurp(mac_runtime .. "/plugin.log") ~= nil
+		and slurp(mac_runtime .. "/plugin.log"):find("platform: macos runtime: " .. mac_runtime, 1, true) ~= nil,
+	tostring(slurp(mac_runtime .. "/plugin.log")))
+
+local mac_result
+ok, mac_result = pcall(Notify, "Download Complete", "Aircar is ready", "", "", "")
+check("macos: Notify runs", ok, mac_result)
+check("macos: Notify spawns nothing", #executed == 0, tostring(#executed) .. " commands")
+check("macos: Notify reports unsupported", mac_result == "unsupported", tostring(mac_result))
+local mac_dropped = false
+for _, entry in ipairs(logged) do
+	if entry[1] == "error" and entry[2]:find("unsupported platform: macos", 1, true) then mac_dropped = true end
+end
+check("macos: dropped notification is logged", mac_dropped)
+
+-- The click and dev-command handoffs live in the same runtime directory.
+local mac_click = assert(io.open(mac_runtime .. "/.click", "w"))
+mac_click:write("1756500000|replay:notificationtoasts_4_desktop")
+mac_click:close()
+ok, taken = pcall(TakeClick)
+check("macos: TakeClick reads the runtime directory",
+	ok and taken == "1756500000|replay:notificationtoasts_4_desktop", tostring(taken))
+
+-- Identity: steam_path answers the bundle (no config/ there), so the
+-- Application Support data directory is the one that answers.
+io.popen("mkdir -p '" .. mac_support .. "/config'"):close()
+local mac_vdf = assert(io.open(mac_support .. "/config/loginusers.vdf", "w"))
+mac_vdf:write('"users"\n{\n\t"76561198000000004"\n\t{\n\t\t"MostRecent"\t\t"1"\n\t}\n}\n')
+mac_vdf:close()
+ok, id_json = pcall(Identity)
+check("macos: Identity reads loginusers.vdf under Library/Application Support",
+	ok and id_json == '{"steamid64":"76561198000000004"}', tostring(id_json))
+check("macos: load publishes the bundle steam_path for the helper",
+	slurp(mac_runtime .. "/steam-dir") == steam_dir .. "\n", tostring(slurp(mac_runtime .. "/steam-dir")))
+
+jit = nil
+steam_dir = tmp_cache .. "/steam"
 
 os.execute = real_execute
 os.getenv = real_getenv

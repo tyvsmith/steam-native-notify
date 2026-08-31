@@ -8,7 +8,10 @@ desktop notification daemon, preserving the artwork and the click action.
 vocabulary, verified facts, testing methodology, and dead ends. Read it
 before non-trivial work. `docs/steam-routing.md` is the analysis of Steam's
 own click handling; `docs/notification-types.md` maps type numbers to names;
-`docs/regeneration.md` restores the removed subsystems if ever needed.
+`docs/regeneration.md` restores the removed subsystems if ever needed;
+`docs/platforms.md` is the platform support matrix (Linux native shipped;
+Flatpak paths ready, host unsupported; macOS and Windows refuse to deliver,
+loudly) and the delivery plan for each.
 
 ## State
 

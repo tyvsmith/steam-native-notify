@@ -18,7 +18,14 @@
 # desktop route is null but whose in-game click does something (see
 # frontend/routes.ts clientOverlayAction). The five positional arguments are a
 # contract shared with backend/main.lua (which builds the invocation) and
-# tools/test-backend (which asserts it).
+# tools/test-backend (which asserts it). Everything else the backend knows
+# arrives through files in the runtime directory (steam-dir, below), never
+# as a sixth argument.
+#
+# Linux only, today: notify-send and gdbus are FreeDesktop tools. The paths
+# below already know the Flatpak and macOS layouts; the delivery half for
+# those platforms is planned in docs/platforms.md, and an unsupported
+# platform is refused in the log, never silently.
 
 set -u
 
@@ -31,18 +38,58 @@ unset LD_LIBRARY_PATH LD_PRELOAD
 APP_NAME="Steam"
 # The icon-theme name used whenever no real artwork can be resolved.
 FALLBACK_ICON="steam"
-# steam.desktop: GNOME and KDE brand the notification from it (app name, logo
-# badge, per-app grouping and settings); quickshell resolves it into the app
-# icon slot. Daemons that do not read it ignore it. Millennium never runs
-# under Flatpak Steam, so the native name is always right.
-DESKTOP_ENTRY="steam"
 RUNTIME_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/steam-native-notify"
 # Since the image-path hint (30982bf) the daemon receives a PATH into this
 # cache, not pixels: a file removed here can blank a history row on a daemon
 # that does not copy what it shows (quickshell copies its own; others
 # unverified). The 30-day prune leans on history only showing recent rows.
 CACHE="$RUNTIME_DIR/icons"
-LIBRARY_CACHE="$HOME/.local/share/Steam/appcache/librarycache"
+
+# Steam's data directory, for the library cache the toast artwork maps onto.
+# The backend publishes millennium.steam_path() to RUNTIME_DIR/steam-dir at
+# load and that answer leads; the guesses cover a missing file and an answer
+# without a library cache (Millennium's macOS answer is the app bundle).
+# Native Linux first, then Steam's Flatpak per-app directory as the host
+# sees it, then the macOS data directory. The first with a library cache
+# wins; none means every game icon falls back to the theme.
+steam_dir_candidates() {
+	published=""
+	if [ -r "$RUNTIME_DIR/steam-dir" ]; then
+		IFS= read -r published <"$RUNTIME_DIR/steam-dir" || :
+		[ -n "$published" ] && printf '%s\n' "$published"
+	fi
+	printf '%s\n' \
+		"$HOME/.steam/steam" \
+		"$HOME/.local/share/Steam" \
+		"$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam" \
+		"$HOME/.var/app/com.valvesoftware.Steam/.steam/steam" \
+		"$HOME/Library/Application Support/Steam"
+}
+steam_dir() {
+	steam_dir_candidates | while IFS= read -r candidate; do
+		if [ -d "$candidate/appcache/librarycache" ]; then
+			printf '%s\n' "$candidate"
+			break
+		fi
+	done
+}
+STEAM_DIR=$(steam_dir)
+LIBRARY_CACHE="${STEAM_DIR:+$STEAM_DIR/appcache/librarycache}"
+
+# steam.desktop: GNOME and KDE brand the notification from it (app name, logo
+# badge, per-app grouping and settings); quickshell resolves it into the app
+# icon slot. Daemons that do not read it ignore it. Flatpak Steam exports its
+# desktop file as com.valvesoftware.Steam.desktop (the manifest renames it),
+# so that is the name whenever Steam is the sandboxed one: this runs inside
+# the sandbox (FLATPAK_ID), or on the host with the per-app directory found.
+DESKTOP_ENTRY="steam"
+if [ "${FLATPAK_ID:-}" = "com.valvesoftware.Steam" ]; then
+	DESKTOP_ENTRY="com.valvesoftware.Steam"
+else
+	case $STEAM_DIR in
+	*/.var/app/com.valvesoftware.Steam/*) DESKTOP_ENTRY="com.valvesoftware.Steam" ;;
+	esac
+fi
 
 # The Desktop Notifications spec reserves "default" for the action a plain body
 # click invokes. Any other name only fires from a button the daemon may or may
@@ -99,7 +146,11 @@ resolve_icon() {
 	*steamloopback.host/assets/*)
 		tail=${raw#*steamloopback.host/assets/}
 		tail=${tail%%\?*}
-		[ -f "$LIBRARY_CACHE/$tail" ] && echo "$LIBRARY_CACHE/$tail" || echo "$FALLBACK_ICON"
+		if [ -n "$LIBRARY_CACHE" ] && [ -f "$LIBRARY_CACHE/$tail" ]; then
+			echo "$LIBRARY_CACHE/$tail"
+		else
+			echo "$FALLBACK_ICON"
+		fi
 		return
 		;;
 	http://* | https://*) ;;
@@ -190,6 +241,22 @@ if [ "${1:-}" = "--daemon-caps" ]; then
 	daemon_parses_markup && echo body-markup || echo plain
 	exit 0
 fi
+
+# Delivery needs notify-send and the FreeDesktop daemon behind it. macOS has
+# neither (its delivery is a plan, docs/platforms.md), and a Linux box can
+# lack libnotify. Either is said in the backend's session log, where
+# tools/capture looks, before this exits: a dropped notification is never
+# silent. After the seams above, which are portable and need no daemon.
+refuse() {
+	printf '%s [steam-native-notify] notify-action: %s\n' \
+		"$(date '+[%Y-%m-%d %H:%M:%S]')" "$1" >>"$RUNTIME_DIR/plugin.log" 2>/dev/null
+	exit 1
+}
+case $(uname -s 2>/dev/null) in
+Darwin) refuse "unsupported platform: macos delivery is not implemented (docs/platforms.md), notification dropped" ;;
+esac
+command -v notify-send >/dev/null 2>&1 \
+	|| refuse "notify-send not found on PATH (install libnotify), notification dropped"
 
 icon=$(resolve_icon "$image")
 if daemon_parses_markup; then
