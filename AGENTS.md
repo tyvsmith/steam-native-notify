@@ -10,7 +10,8 @@ before non-trivial work. `docs/steam-routing.md` is the analysis of Steam's
 own click handling; `docs/notification-types.md` maps type numbers to names;
 `docs/regeneration.md` restores the removed subsystems if ever needed;
 `docs/platforms.md` is the platform support matrix (Linux native shipped;
-Flatpak paths ready, host unsupported; macOS and Windows refuse to deliver,
+Flatpak paths ready, host unsupported; Windows delivery shipped but
+EXPERIMENTAL and unvalidated on real hardware; macOS refuses to deliver,
 loudly) and the delivery plan for each.
 
 ## State

@@ -481,6 +481,14 @@ beyond what the plugin does itself at load; 32-bit Windows.
           writes <epoch>|replay:<name> -> .click.tmp -> .click
       the in-Steam bridge consumes it exactly as on Linux
 
+Only `replay:` routes carry on Windows, which is not a loss: the bridge
+refuses every other shape on Linux too (`click-bridge: unbridgeable route`),
+and the frontend has emitted nothing but replay tokens since the routing
+catalog left. The POSIX helper writes any non-empty route to the click file
+and lets the bridge refuse; the Windows toast simply omits the launch
+attribute instead, so the click dismisses -- same outcome, decided one step
+earlier.
+
 ### Setup, run at every load (idempotent, reversible)
 
 `notify-action.ps1 -Setup`, spawned by on_load:

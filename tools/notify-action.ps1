@@ -106,7 +106,13 @@ if (-not $Id) { exit 2 }
 
 $NotifyFile = Join-Path $RuntimeDir "$Id.notify"
 if (-not (Test-Path -LiteralPath $NotifyFile)) { exit 1 }
-$Payload = Get-Content -LiteralPath $NotifyFile -Raw | ConvertFrom-Json
+try {
+    $Payload = Get-Content -LiteralPath $NotifyFile -Raw | ConvertFrom-Json
+} catch {
+    Write-PluginLog "payload $Id unreadable, notification dropped: $($_.Exception.Message)"
+    Remove-Item -LiteralPath $NotifyFile -Force -ErrorAction SilentlyContinue
+    exit 1
+}
 Remove-Item -LiteralPath $NotifyFile -Force
 
 # The notification platform can wedge under bursts ("The notification
@@ -173,7 +179,12 @@ function Limit-IconSize([string]$Path) {
         $side = [Math]::Min(256, [Math]::Max($img.Width, $img.Height))
         $scale = $side / [Math]::Max($img.Width, $img.Height)
         $small = New-Object System.Drawing.Bitmap $img, ([int]($img.Width * $scale)), ([int]($img.Height * $scale))
-        $out = "$Path.256.png"
+        # Into the plugin's own cache, never beside the source: the source
+        # can be Steam's library cache, which is not this plugin's to write
+        # into, and only RuntimeDir\icons is swept by the 30-day prune.
+        $cache = Join-Path $RuntimeDir 'icons'
+        New-Item -ItemType Directory -Path $cache -Force | Out-Null
+        $out = Join-Path $cache "$([System.IO.Path]::GetFileName($Path)).256.png"
         $small.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
         $small.Dispose(); $img.Dispose()
         return $out

@@ -260,11 +260,20 @@ local function spawn_helper(title, body, raw_image, route, ingame)
             log_line("error", "could not write " .. file .. "; notification dropped")
             return false
         end
-        handle:write(json.encode({
+        -- Checked like materialize_asset: a short write would hand the
+        -- helper a truncated JSON file and report "ok", losing the
+        -- notification on both surfaces (the frontend closes Steam's toast
+        -- on "ok").
+        local written = handle:write(json.encode({
             title = title, body = body, image = raw_image,
             route = route, ingame = ingame,
         }))
-        handle:close()
+        local closed = handle:close()
+        if not written or not closed then
+            log_line("error", "payload write failed for " .. file .. "; notification dropped")
+            os.remove(file)
+            return false
+        end
         if not spawn_windows_helper('-Id "' .. id .. '"') then
             os.remove(file)
             return false

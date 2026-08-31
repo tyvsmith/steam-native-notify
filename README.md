@@ -47,8 +47,9 @@ Two toggles, both on by default:
   game has focus, alongside Steam's in-game toast. Off keeps in-game
   notifications inside Steam only.
 
-Steam's own toast is hidden once its text has been read — the native
-notification replaces it rather than duplicating it. That and the
+Steam's own toast is hidden once the native notification is confirmed
+delivered — it replaces Steam's toast rather than duplicating it, and a
+failed or unimplemented delivery leaves Steam's toast alone. That and the
 `tools/fire` test-command door are developer toggles (`hideSteamToast`,
 on by default; `devFire`, off), hidden unless `devMode` is set in the
 plugin's stored settings — there is deliberately no UI for it (see
@@ -85,9 +86,11 @@ the vocabulary table is in `docs/architecture.md`.
 - The 64-bit SteamRT3 client does not work: Millennium installs and reports
   success there, but its hook does nothing
   ([Millennium #840](https://github.com/SteamClientHomebrew/Millennium/issues/840)).
-- A notification is clickable only while its popup is up; the copy in the
-  notification centre is inert. quickshell 1.2 expires the popup after about
-  8 seconds despite the no-timeout hint, which bounds the click window.
+- On Linux a notification is clickable only while its popup is up; the copy
+  in the notification centre is inert. quickshell 1.2 expires the popup
+  after about 8 seconds despite the no-timeout hint, which bounds the click
+  window. (On Windows, protocol activation is designed to make Action
+  Center clicks work too — unverified, like all Windows behaviour here.)
 - The stashed click is frozen to the surface the toast rendered on: a
   notification captured while a game was focused, clicked after that game
   exits, does nothing. Clicks also expire 120 seconds after delivery and do
