@@ -10,6 +10,10 @@ on:
         type: boolean
         default: true
 
+# Read-only by default; only the release job elevates, to publish.
+permissions:
+  contents: read
+
 jobs:
   build:
     uses: ./.github/workflows/build.yml

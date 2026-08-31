@@ -13,6 +13,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # The job runs repository scripts (bun install, bun run test); keep the
+    # token they can reach read-only regardless of the caller's grant.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
