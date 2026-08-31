@@ -145,6 +145,25 @@ end
 check("helper materialized verbatim",
 	slurp(tmp_cache .. "/steam-native-notify/notify-action") == slurp(root .. "/tools/notify-action"))
 
+-- A write that fails (disk full, a quota) must be reported as a failed
+-- install, not as a helper at its path: io.open is shimmed to hand the
+-- helper's own open a handle whose write refuses.
+local real_open = io.open
+io.open = function(path, mode)
+	if mode == "wb" and path:find("/notify%-action$") then
+		return { write = function() return nil, "disk full" end, close = function() return true end }
+	end
+	return real_open(path, mode)
+end
+logged = {}
+pcall(plugin.on_load)
+io.open = real_open
+local short_write = false
+for _, entry in ipairs(logged) do
+	if entry[1] == "error" and entry[2]:find("helper install FAILED: disk full", 1, true) then short_write = true end
+end
+check("a failed helper write is reported as a failed install", short_write)
+
 -- A notification with no route: the download-complete shape.
 executed = {}
 ok, err = pcall(Notify, "Download Complete", "Aircar is ready", "https://steamloopback.host/assets/1073390/x.jpg?c=1", nil, nil)

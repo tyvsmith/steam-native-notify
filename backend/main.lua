@@ -116,8 +116,12 @@ local function install_helper()
     fs.create_directories(RUNTIME_DIR)
     local handle, err = io.open(HELPER, "wb")
     if not handle then return nil, tostring(err) end
-    handle:write(content)
-    handle:close()
+    -- A short write (disk full, a quota) surfaces on write or on close, and
+    -- either would otherwise report a truncated helper as installed.
+    local written, write_err = handle:write(content)
+    local closed, close_err = handle:close()
+    if not written then return nil, tostring(write_err) end
+    if not closed then return nil, tostring(close_err) end
     return HELPER
 end
 
