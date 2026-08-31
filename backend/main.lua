@@ -11,32 +11,73 @@ local APP_NAME = "Steam"
 
 -- Platform, decided once. Lua's package.config opens with the directory
 -- separator: "\" on Windows, "/" everywhere else (LuaJIT sets it like PUC
--- Lua). Every path and spawn below branches on this, nothing else asks the
--- OS. docs/windows-plan.md is the plan for the Windows half.
+-- Lua). macOS shares the "/" and is told apart by LuaJIT's jit.os ("OSX";
+-- Millennium's host is LuaJIT and opens the standard libraries, so the jit
+-- table should be there), falling back to the SystemVersion.plist every
+-- macOS carries when no jit table is exposed. Every path and spawn below
+-- branches on these, nothing else asks the OS. docs/windows-plan.md is the
+-- plan for the platforms that do not deliver yet.
 local SEP = (type(package) == "table" and type(package.config) == "string")
     and package.config:sub(1, 1) or "/"
 local IS_WINDOWS = SEP == "\\"
-local PLATFORM = IS_WINDOWS and "windows" or "posix"
+local function detect_macos()
+    if IS_WINDOWS then return false end
+    if type(jit) == "table" and type(jit.os) == "string" then
+        return jit.os == "OSX"
+    end
+    local probe = io.open("/System/Library/CoreServices/SystemVersion.plist", "r")
+    if probe then
+        probe:close()
+        return true
+    end
+    return false
+end
+local IS_MACOS = detect_macos()
+local PLATFORM = IS_WINDOWS and "windows" or (IS_MACOS and "macos" or "linux")
+-- Set by flatpak inside an app's sandbox (Steam's is com.valvesoftware.Steam).
+-- Millennium does not run there today; logged so a run that does is
+-- recognisable, and every $HOME-relative path below already resolves inside
+-- the sandbox through Steam's --persist=. bind mount.
+local FLATPAK_ID = (PLATFORM == "linux") and os.getenv("FLATPAK_ID") or nil
+
+--- Separator-safe join. A trailing separator on a piece is dropped first, so
+--- a steam_path() that answers with one (Millennium's Linux build does) or a
+--- cache variable typed with one never doubles up. Millennium's fs has a
+--- join as well; this one needs no module, so the paths it builds exist
+--- before any require can fail and the offline tests exercise the same code.
+local function join(...)
+    local pieces = { ... }
+    local path = pieces[1]
+    for i = 2, #pieces do
+        path = (path:gsub("[/\\]+$", "")) .. SEP .. pieces[i]
+    end
+    return path
+end
 
 -- The packed .star is never unpacked on disk, so there is no plugin directory
 -- at runtime. Everything file-shaped lives in a cache directory instead: the
 -- notify-action helper is carried inside the .star as an asset and written out
 -- here at load, and tools/fire drops its command file here too. XDG_CACHE_HOME
--- to match the helper's own icon cache next door; on Windows the per-user
--- local (non-roaming) app data folder, the same role.
+-- to match the helper's own icon cache next door (inside a Flatpak sandbox
+-- flatpak points it at the per-app cache, which is where it should be); on
+-- Windows the per-user local (non-roaming) app data folder and on macOS the
+-- user's Library/Caches, the same role on each.
 local function runtime_dir()
+    local home = os.getenv("HOME") or ""
     if IS_WINDOWS then
         local base = os.getenv("LOCALAPPDATA")
-            or ((os.getenv("USERPROFILE") or "") .. "\\AppData\\Local")
-        return base .. "\\steam-native-notify"
+            or join(os.getenv("USERPROFILE") or "", "AppData", "Local")
+        return join(base, "steam-native-notify")
     end
-    return (os.getenv("XDG_CACHE_HOME") or ((os.getenv("HOME") or "") .. "/.cache"))
-        .. "/steam-native-notify"
+    if IS_MACOS then
+        return join(home, "Library", "Caches", "steam-native-notify")
+    end
+    return join(os.getenv("XDG_CACHE_HOME") or join(home, ".cache"), "steam-native-notify")
 end
 local RUNTIME_DIR = runtime_dir()
-local HELPER = RUNTIME_DIR .. SEP .. "notify-action"
+local HELPER = join(RUNTIME_DIR, "notify-action")
 local HELPER_ASSET = "tools/notify-action"
-local LOG_FILE = RUNTIME_DIR .. SEP .. "plugin.log"
+local LOG_FILE = join(RUNTIME_DIR, "plugin.log")
 
 --- Millennium keeps a packed plugin's logger output in an in-memory buffer
 --- (readable in its UI log viewer) and never writes it to Steam's
@@ -92,11 +133,19 @@ end
 --- runtime's system(), which runs cmd.exe, and from Millennium's
 --- GUI-subsystem Lua host that allocates a console window per notification.
 --- The design (a PowerShell wrapper around snoretoast.exe, started without a
---- console) is docs/windows-plan.md. Until it lands this logs and returns
---- false, so a Windows install fails in the log rather than in silence.
+--- console) is docs/windows-plan.md.
+---
+--- macOS: not implemented. sh is there but notify-send and gdbus are not;
+--- the helper would fail on its own, and does so loudly, but nothing is
+--- gained by spawning it. The delivery design (terminal-notifier or alerter)
+--- is docs/windows-plan.md.
+---
+--- Until either lands this logs and returns false, so an install on those
+--- platforms fails in the log rather than in silence.
 local function spawn_helper(title, body, raw_image, route, ingame)
-    if IS_WINDOWS then
-        log_line("error", "unsupported platform: windows delivery is not implemented, notification dropped")
+    if IS_WINDOWS or IS_MACOS then
+        log_line("error", "unsupported platform: " .. PLATFORM
+            .. " delivery is not implemented, notification dropped")
         return false
     end
     local command = table.concat({
@@ -196,8 +245,7 @@ local function loginusers_candidates()
     local candidates = {}
     local ok, steam = pcall(function() return millennium.steam_path() end)
     if ok and type(steam) == "string" and steam ~= "" then
-        steam = steam:gsub("[/\\]+$", "")
-        candidates[#candidates + 1] = steam .. SEP .. "config" .. SEP .. "loginusers.vdf"
+        candidates[#candidates + 1] = join(steam, "config", "loginusers.vdf")
     end
     if not IS_WINDOWS then
         local home = os.getenv("HOME") or ""
@@ -252,7 +300,7 @@ end
 ---@ffi
 ---@return string
 function TakeDevCommand()
-    return consume(RUNTIME_DIR .. SEP .. ".dev-fire")
+    return consume(join(RUNTIME_DIR, ".dev-fire"))
 end
 
 --- Click handoff: notify-action writes every clicked route (or action token)
@@ -262,7 +310,7 @@ end
 ---@ffi
 ---@return string
 function TakeClick()
-    return consume(RUNTIME_DIR .. SEP .. ".click")
+    return consume(join(RUNTIME_DIR, ".click"))
 end
 
 local function on_load()
@@ -273,16 +321,19 @@ local function on_load()
     if fresh then fresh:close() end
 
     log_line("info", "backend loaded")
-    log_line("info", "platform: " .. PLATFORM .. " runtime: " .. RUNTIME_DIR)
+    log_line("info", "platform: " .. PLATFORM
+        .. (FLATPAK_ID and (" flatpak: " .. FLATPAK_ID) or "")
+        .. " runtime: " .. RUNTIME_DIR)
 
     migrate_legacy_settings()
 
-    -- The POSIX helper is useless on Windows (it is sh), so it is not written
-    -- there; the Windows helper is a different asset that arrives with the
-    -- Windows spawn branch. Said once at load, and again per dropped
-    -- notification by spawn_helper, so neither end is ever silent.
-    if IS_WINDOWS then
-        log_line("error", "desktop delivery is not implemented on windows"
+    -- The helper is only materialized where it can deliver. On Windows it is
+    -- useless (it is sh); on macOS it would run and stop at the missing
+    -- notify-send. Either platform's helper arrives with its spawn branch.
+    -- Said once at load, and again per dropped notification by spawn_helper,
+    -- so neither end is ever silent.
+    if IS_WINDOWS or IS_MACOS then
+        log_line("error", "desktop delivery is not implemented on " .. PLATFORM
             .. " -- notifications will not be delivered (docs/windows-plan.md)")
     else
         local helper, err = install_helper()

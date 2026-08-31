@@ -606,6 +606,69 @@ check("windows: Identity reads loginusers.vdf under steam_path",
 
 package.config = posix_config
 
+-- ---------------------------------------------------------------------------
+-- The macOS branch. package.config says "/" there too, so main.lua asks
+-- LuaJIT's jit.os; this runner is PUC Lua, so a jit table is planted for a
+-- third load. HOME moves to a throwaway directory: the runtime directory
+-- lands under ~/Library/Caches, delivery is refused the way Windows is (the
+-- sh helper has no notify-send to call), and Identity reads
+-- ~/Library/Application Support/Steam when steam_path answers the app
+-- bundle's MacOS directory, which holds no config/.
+-- ---------------------------------------------------------------------------
+local mac_home = tmp_cache .. "/machome"
+io.popen("mkdir -p '" .. mac_home .. "'"):close()
+local mac_support = mac_home .. "/Library/Application Support/Steam"
+steam_dir = mac_support .. "/Steam.AppBundle/Steam/Contents/MacOS"
+jit = { os = "OSX" }
+os.getenv = function(name)
+	if name == "HOME" then return mac_home end
+	if name == "XDG_CACHE_HOME" then return nil end
+	return real_getenv(name)
+end
+local mac_runtime = mac_home .. "/Library/Caches/steam-native-notify"
+
+logged = {}
+executed = {}
+local mac_plugin = dofile(root .. "/backend/main.lua")
+ok, err = pcall(mac_plugin.on_load)
+check("macos: on_load runs", ok, err)
+
+local mac_platform, mac_unsupported, mac_helper = false, false, false
+for _, entry in ipairs(logged) do
+	if entry[2]:find("platform: macos", 1, true) then mac_platform = true end
+	if entry[1] == "error" and entry[2]:find("not implemented on macos", 1, true) then mac_unsupported = true end
+	if entry[2]:find("helper: ", 1, true) then mac_helper = true end
+end
+check("macos: load names the platform", mac_platform)
+check("macos: load reports delivery unsupported as an error", mac_unsupported)
+check("macos: no helper is materialized", not mac_helper)
+check("macos: runtime directory lives under Library/Caches",
+	slurp(mac_runtime .. "/plugin.log") ~= nil
+		and slurp(mac_runtime .. "/plugin.log"):find("platform: macos runtime: " .. mac_runtime, 1, true) ~= nil,
+	tostring(slurp(mac_runtime .. "/plugin.log")))
+
+local mac_result
+ok, mac_result = pcall(Notify, "Download Complete", "Aircar is ready", "", "", "")
+check("macos: Notify runs", ok, mac_result)
+check("macos: Notify spawns nothing", #executed == 0, tostring(#executed) .. " commands")
+check("macos: Notify reports unsupported", mac_result == "unsupported", tostring(mac_result))
+local mac_dropped = false
+for _, entry in ipairs(logged) do
+	if entry[1] == "error" and entry[2]:find("unsupported platform: macos", 1, true) then mac_dropped = true end
+end
+check("macos: dropped notification is logged", mac_dropped)
+
+-- The click and dev-command handoffs live in the same runtime directory.
+local mac_click = assert(io.open(mac_runtime .. "/.click", "w"))
+mac_click:write("1756500000|replay:notificationtoasts_4_desktop")
+mac_click:close()
+ok, taken = pcall(TakeClick)
+check("macos: TakeClick reads the runtime directory",
+	ok and taken == "1756500000|replay:notificationtoasts_4_desktop", tostring(taken))
+
+jit = nil
+steam_dir = tmp_cache .. "/steam"
+
 os.execute = real_execute
 os.getenv = real_getenv
 if tmp_cache:find("^/tmp/") then os.execute("rm -rf '" .. tmp_cache .. "'") end
