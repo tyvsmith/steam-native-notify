@@ -75,8 +75,13 @@ local function runtime_dir()
     return join(os.getenv("XDG_CACHE_HOME") or join(home, ".cache"), "steam-native-notify")
 end
 local RUNTIME_DIR = runtime_dir()
-local HELPER = join(RUNTIME_DIR, "notify-action")
-local HELPER_ASSET = "tools/notify-action"
+-- Windows delivers through a PowerShell helper and a JScript click handler
+-- (docs/platforms.md); POSIX through the sh helper. Each platform
+-- materializes only what it runs.
+local HELPER = join(RUNTIME_DIR, IS_WINDOWS and "notify-action.ps1" or "notify-action")
+local HELPER_ASSET = IS_WINDOWS and "tools/notify-action.ps1" or "tools/notify-action"
+local CLICK_HANDLER = join(RUNTIME_DIR, "click-handler.js")
+local CLICK_HANDLER_ASSET = "tools/click-handler.js"
 local LOG_FILE = join(RUNTIME_DIR, "plugin.log")
 
 --- Millennium keeps a packed plugin's logger output in an in-memory buffer
@@ -103,18 +108,19 @@ local function shell_quote(value)
     return "'" .. escaped .. "'"
 end
 
---- Write the bundled helper into RUNTIME_DIR. Runs on every load, so the
---- on-disk copy always matches the packed plugin. Spawned through `sh`
---- (io.open cannot set an executable bit, and does not need to). Written in
---- binary mode: a no-op on POSIX, and the only mode that keeps a packed
---- asset byte-identical on Windows, where text mode rewrites line endings.
-local function install_helper()
-    local content = millennium.assets.read(HELPER_ASSET)
+--- Write one bundled asset into RUNTIME_DIR. Runs on every load, so the
+--- on-disk copy always matches the packed plugin. Spawned through `sh` on
+--- POSIX (io.open cannot set an executable bit, and does not need to).
+--- Written in binary mode: a no-op on POSIX, and the only mode that keeps a
+--- packed asset byte-identical on Windows, where text mode rewrites line
+--- endings.
+local function materialize_asset(asset, target)
+    local content = millennium.assets.read(asset)
     if type(content) ~= "string" or content == "" then
-        return nil, "asset " .. HELPER_ASSET .. " missing from the plugin bundle"
+        return nil, "asset " .. asset .. " missing from the plugin bundle"
     end
     fs.create_directories(RUNTIME_DIR)
-    local handle, err = io.open(HELPER, "wb")
+    local handle, err = io.open(target, "wb")
     if not handle then return nil, tostring(err) end
     -- A short write (disk full, a quota) surfaces on write or on close, and
     -- either would otherwise report a truncated helper as installed.
@@ -122,8 +128,100 @@ local function install_helper()
     local closed, close_err = handle:close()
     if not written then return nil, tostring(write_err) end
     if not closed then return nil, tostring(close_err) end
-    return HELPER
+    return target
 end
+
+local function install_helper()
+    return materialize_asset(HELPER_ASSET, HELPER)
+end
+
+--- CreateProcessW through LuaJIT's ffi: the one way to start a child with
+--- no console from Millennium's GUI-subsystem Lua host (os.execute is the C
+--- runtime's system(), which runs cmd.exe and flashes a window per call;
+--- io.popen is _popen, documented to hang in GUI programs). Lazy and under
+--- pcall: whether the host enables ffi is the first hardware check in
+--- docs/platforms.md, and a host without it must degrade to a log line,
+--- never a load failure.
+local win_ffi
+local function windows_ffi()
+    if win_ffi ~= nil then return win_ffi or nil end
+    local ok, ffi = pcall(require, "ffi")
+    if not ok or type(ffi) ~= "table" then
+        win_ffi = false
+        return nil
+    end
+    pcall(ffi.cdef, [[
+        typedef struct {
+            uint32_t cb; void* lpReserved; void* lpDesktop; void* lpTitle;
+            uint32_t dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars,
+                dwFillAttribute, dwFlags;
+            uint16_t wShowWindow, cbReserved2; void* lpReserved2;
+            void* hStdInput; void* hStdOutput; void* hStdError;
+        } SNN_STARTUPINFOW;
+        typedef struct {
+            void* hProcess; void* hThread; uint32_t dwProcessId, dwThreadId;
+        } SNN_PROCESS_INFORMATION;
+        int32_t CreateProcessW(const wchar_t*, wchar_t*, void*, void*, int32_t,
+            uint32_t, void*, const wchar_t*, SNN_STARTUPINFOW*,
+            SNN_PROCESS_INFORMATION*);
+        int32_t CloseHandle(void*);
+        int MultiByteToWideChar(unsigned int, uint32_t, const char*, int,
+            wchar_t*, int);
+    ]])
+    win_ffi = ffi
+    return ffi
+end
+
+--- UTF-8 to UTF-16 for the W-suffixed API; LOCALAPPDATA can carry any
+--- username, so the command line cannot be assumed ASCII.
+local function to_wide(ffi, text)
+    local CP_UTF8 = 65001
+    local needed = ffi.C.MultiByteToWideChar(CP_UTF8, 0, text, #text, nil, 0)
+    if needed <= 0 then return nil end
+    local buffer = ffi.new("wchar_t[?]", needed + 1)
+    ffi.C.MultiByteToWideChar(CP_UTF8, 0, text, #text, buffer, needed)
+    buffer[needed] = 0
+    return buffer
+end
+
+--- Start Windows PowerShell (5.1: pwsh cannot project WinRT) on the
+--- materialized helper with CREATE_NO_WINDOW, detached. False, with the
+--- reason logged, when ffi is missing or the call fails.
+local function spawn_windows_helper(arguments)
+    local ffi = windows_ffi()
+    if not ffi then
+        log_line("error",
+            "ffi unavailable in this Lua host; Windows delivery needs it (docs/platforms.md)")
+        return false
+    end
+    local system_root = os.getenv("SystemRoot") or "C:\\Windows"
+    local powershell = join(system_root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    local command = '"' .. powershell .. '" -NoProfile -NonInteractive'
+        .. ' -ExecutionPolicy Bypass -File "' .. HELPER .. '" ' .. arguments
+    local ok, spawned = pcall(function()
+        local CREATE_NO_WINDOW = 0x08000000
+        local startup = ffi.new("SNN_STARTUPINFOW")
+        startup.cb = ffi.sizeof("SNN_STARTUPINFOW")
+        local process = ffi.new("SNN_PROCESS_INFORMATION")
+        local wide = to_wide(ffi, command)
+        if not wide then return false end
+        if ffi.C.CreateProcessW(nil, wide, nil, nil, 0, CREATE_NO_WINDOW,
+            nil, nil, startup, process) == 0 then
+            return false
+        end
+        ffi.C.CloseHandle(process.hProcess)
+        ffi.C.CloseHandle(process.hThread)
+        return true
+    end)
+    if not ok or not spawned then
+        log_line("error", "CreateProcessW failed for the Windows helper"
+            .. (ok and "" or (": " .. tostring(spawned))))
+        return false
+    end
+    return true
+end
+
+local notify_seq = 0
 
 --- Hand the five delivery slots to the platform's helper, detached, and say
 --- whether anything was spawned. The one seam that knows how a process
@@ -133,24 +231,45 @@ end
 --- helper blocks for the popup's lifetime, and this backend's single event
 --- loop must keep answering the frontend's polls meanwhile.
 ---
---- Windows: not implemented. There is no sh and no `&`; os.execute is the C
---- runtime's system(), which runs cmd.exe, and from Millennium's
---- GUI-subsystem Lua host that allocates a console window per notification.
---- The design (a PowerShell wrapper around snoretoast.exe, started without a
---- console) is docs/platforms.md.
+--- Windows (EXPERIMENTAL, unvalidated on real hardware; docs/platforms.md
+--- lists the checks): the five slots travel as a <id>.notify JSON file --
+--- a file, not a command line, so quoting stays out of the contract -- and
+--- notify-action.ps1 is started through CreateProcessW above. The helper
+--- shows the toast and exits; a click comes back through the snn: URI
+--- scheme's handler, not through a waiting process.
 ---
 --- macOS: not implemented. sh is there but notify-send and gdbus are not;
 --- the helper would fail on its own, and does so loudly, but nothing is
 --- gained by spawning it. The delivery design (terminal-notifier or alerter)
 --- is docs/platforms.md.
 ---
---- Until either lands this logs and returns false, so an install on those
---- platforms fails in the log rather than in silence.
+--- Until macOS lands this logs and returns false there, so an install on
+--- that platform fails in the log rather than in silence.
 local function spawn_helper(title, body, raw_image, route, ingame)
-    if IS_WINDOWS or IS_MACOS then
-        log_line("error", "unsupported platform: " .. PLATFORM
+    if IS_MACOS then
+        log_line("error", "unsupported platform: macos"
             .. " delivery is not implemented, notification dropped")
         return false
+    end
+    if IS_WINDOWS then
+        notify_seq = notify_seq + 1
+        local id = tostring(os.time()) .. "-" .. tostring(notify_seq)
+        local file = join(RUNTIME_DIR, id .. ".notify")
+        local handle = io.open(file, "wb")
+        if not handle then
+            log_line("error", "could not write " .. file .. "; notification dropped")
+            return false
+        end
+        handle:write(json.encode({
+            title = title, body = body, image = raw_image,
+            route = route, ingame = ingame,
+        }))
+        handle:close()
+        if not spawn_windows_helper('-Id "' .. id .. '"') then
+            os.remove(file)
+            return false
+        end
+        return true
     end
     local command = table.concat({
         "sh",
@@ -371,13 +490,13 @@ local function on_load()
     migrate_legacy_settings()
     publish_steam_dir()
 
-    -- The helper is only materialized where it can deliver. On Windows it is
-    -- useless (it is sh); on macOS it would run and stop at the missing
-    -- notify-send. Either platform's helper arrives with its spawn branch.
-    -- Said once at load, and again per dropped notification by spawn_helper,
-    -- so neither end is ever silent.
-    if IS_WINDOWS or IS_MACOS then
-        log_line("error", "desktop delivery is not implemented on " .. PLATFORM
+    -- Each platform materializes what it runs: the sh helper on Linux, the
+    -- PowerShell helper plus the snn: click handler on Windows (registered
+    -- by the helper's -Setup, re-run at every load, idempotent). macOS has
+    -- no delivery yet and says so once here, and again per dropped
+    -- notification, so neither end is ever silent.
+    if IS_MACOS then
+        log_line("error", "desktop delivery is not implemented on macos"
             .. " -- notifications will not be delivered (docs/platforms.md)")
     else
         local helper, err = install_helper()
@@ -386,6 +505,19 @@ local function on_load()
         else
             log_line("error", "helper install FAILED: " .. tostring(err)
                 .. " -- notifications will not be delivered")
+        end
+        if IS_WINDOWS and helper then
+            log_line("info", "windows delivery is EXPERIMENTAL and unvalidated"
+                .. " -- docs/platforms.md lists the checks")
+            local handler, handler_err = materialize_asset(CLICK_HANDLER_ASSET, CLICK_HANDLER)
+            if not handler then
+                log_line("error", "click handler install FAILED: " .. tostring(handler_err)
+                    .. " -- toast clicks will do nothing")
+            end
+            if not spawn_windows_helper("-Setup") then
+                log_line("error", "helper -Setup could not run"
+                    .. " -- toasts may be unbranded and clicks unregistered")
+            end
         end
     end
 

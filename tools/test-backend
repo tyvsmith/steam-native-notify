@@ -739,31 +739,92 @@ local win_plugin = dofile(root .. "/backend/main.lua")
 ok, err = pcall(win_plugin.on_load)
 check("windows: on_load runs", ok, err)
 
-local win_platform, win_unsupported, win_helper = false, false, false
+local win_platform, win_experimental, win_helper, win_setup_failed = false, false, false, false
 for _, entry in ipairs(logged) do
 	if entry[2]:find("platform: windows", 1, true) then win_platform = true end
-	if entry[1] == "error" and entry[2]:find("not implemented on windows", 1, true) then win_unsupported = true end
+	if entry[2]:find("EXPERIMENTAL", 1, true) then win_experimental = true end
 	if entry[2]:find("helper: ", 1, true) then win_helper = true end
+	if entry[1] == "error" and entry[2]:find("-Setup could not run", 1, true) then win_setup_failed = true end
 end
 check("windows: load names the platform", win_platform)
-check("windows: load reports delivery unsupported as an error", win_unsupported)
-check("windows: no helper is materialized", not win_helper)
+check("windows: load marks delivery experimental", win_experimental)
+check("windows: the PowerShell helper is materialized", win_helper)
+check("windows: helper matches the packed asset",
+	slurp(win_runtime .. "\\notify-action.ps1") == slurp(root .. "/tools/notify-action.ps1"))
+check("windows: click handler matches the packed asset",
+	slurp(win_runtime .. "\\click-handler.js") == slurp(root .. "/tools/click-handler.js"))
+-- This runner is PUC Lua: require("ffi") fails, so setup must degrade to a
+-- log line, never a load failure.
+check("windows: setup failure without ffi is logged", win_setup_failed)
 check("windows: runtime directory lives under LOCALAPPDATA",
 	slurp(win_runtime .. "\\plugin.log") ~= nil
 		and slurp(win_runtime .. "\\plugin.log"):find("platform: windows runtime: " .. win_runtime, 1, true) ~= nil,
 	tostring(slurp(win_runtime .. "\\plugin.log")))
 
--- Notify must not spawn anything, must say so, and must not throw.
+-- Without ffi, Notify must not spawn anything, must clean up its payload
+-- file, must say why, and must not throw.
 local win_result
 ok, win_result = pcall(Notify, "Download Complete", "Aircar is ready", "", "", "")
 check("windows: Notify runs", ok, win_result)
-check("windows: Notify spawns nothing", #executed == 0, tostring(#executed) .. " commands")
-check("windows: Notify reports unsupported", win_result == "unsupported", tostring(win_result))
+check("windows: Notify spawns nothing without ffi", #executed == 0, tostring(#executed) .. " commands")
+check("windows: Notify reports unsupported without ffi", win_result == "unsupported", tostring(win_result))
 local win_dropped = false
 for _, entry in ipairs(logged) do
-	if entry[1] == "error" and entry[2]:find("unsupported platform", 1, true) then win_dropped = true end
+	if entry[1] == "error" and entry[2]:find("ffi unavailable", 1, true) then win_dropped = true end
 end
-check("windows: dropped notification is logged", win_dropped)
+check("windows: the missing ffi is logged", win_dropped)
+-- Backslash-joined paths land as flat entries inside tmp_cache on this
+-- POSIX runner, so that is where the payload file (or its absence) shows.
+local leftover = io.popen("ls '" .. tmp_cache .. "' | grep -c '\\.notify$'"):read("*l")
+check("windows: the payload file is removed on a failed spawn", leftover == "0", tostring(leftover))
+
+-- With ffi present (stubbed: this runner is PUC Lua), the spawn goes through
+-- CreateProcessW: the setup pass at load, then one PowerShell invocation per
+-- notification, with the five slots in a <id>.notify file the helper reads.
+local ffi_commands = {}
+package.preload["ffi"] = function()
+	local last_text
+	return {
+		cdef = function() end,
+		sizeof = function() return 68 end,
+		new = function() return {} end,
+		C = {
+			MultiByteToWideChar = function(_, _, text, len, buffer)
+				if buffer ~= nil then last_text = text end
+				return len
+			end,
+			CreateProcessW = function()
+				ffi_commands[#ffi_commands + 1] = last_text
+				return 1
+			end,
+			CloseHandle = function() return 1 end,
+		},
+	}
+end
+logged = {}
+executed = {}
+local win_ffi_plugin = dofile(root .. "/backend/main.lua")
+ok, err = pcall(win_ffi_plugin.on_load)
+check("windows+ffi: on_load runs", ok, err)
+check("windows+ffi: setup is spawned through CreateProcessW",
+	#ffi_commands == 1
+		and ffi_commands[1]:find("powershell.exe", 1, true) ~= nil
+		and ffi_commands[1]:find('-File "' .. win_runtime .. '\\notify-action.ps1" -Setup', 1, true) ~= nil,
+	tostring(ffi_commands[1]))
+ok, win_result = pcall(Notify, "Download Complete", "Aircar is ready", "img", "replay:notificationtoasts_9_desktop", "")
+check("windows+ffi: Notify runs", ok, win_result)
+check("windows+ffi: Notify reports ok", win_result == "ok", tostring(win_result))
+check("windows+ffi: delivery is spawned with an id",
+	#ffi_commands == 2 and ffi_commands[2]:find('%-Id "%d+%-%d+"$') ~= nil, tostring(ffi_commands[2]))
+check("windows+ffi: nothing rides os.execute", #executed == 0, tostring(#executed))
+local payload_name = io.popen("ls '" .. tmp_cache .. "' | grep '\\.notify$' | head -1"):read("*l")
+local payload = payload_name and slurp(tmp_cache .. "/" .. payload_name) or nil
+check("windows+ffi: the payload file carries the five slots",
+	payload ~= nil
+		and payload:find('"title":"Download Complete"', 1, true) ~= nil
+		and payload:find('"route":"replay:notificationtoasts_9_desktop"', 1, true) ~= nil,
+	tostring(payload))
+package.preload["ffi"] = nil
 
 -- The click and dev-command handoffs join with the platform separator.
 local win_click = assert(io.open(win_runtime .. "\\.click", "w"))
