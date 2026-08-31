@@ -73,9 +73,14 @@ the vocabulary table is in `docs/architecture.md`.
   notification daemon that supports actions. Without action support the
   notification shows but the click does nothing. Flatpak and Snap Steam are
   not supported by Millennium itself; the plugin's paths already know the
-  Flatpak layout, but nothing has run there. On macOS and Windows the
-  backend loads, logs that delivery is not implemented, and delivers
-  nothing. `docs/platforms.md` is the support matrix and the plan for each.
+  Flatpak layout, but nothing has run there. On macOS the backend loads,
+  logs that delivery is not implemented, and delivers nothing.
+- **Windows delivery is EXPERIMENTAL and has not been validated on real
+  hardware.** The pieces ship (WinRT toasts through a PowerShell helper,
+  clicks through a per-user `snn:` URI scheme; no vendored binaries, all
+  registration per-user and reversible), the plugin says so in its log at
+  load, and `docs/platforms.md` lists the validation pass it still needs.
+  Treat any Windows behaviour as unverified until that pass has run.
 - The 64-bit SteamRT3 client does not work: Millennium installs and reports
   success there, but its hook does nothing
   ([Millennium #840](https://github.com/SteamClientHomebrew/Millennium/issues/840)).
