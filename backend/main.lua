@@ -160,12 +160,29 @@ end
 --- (profiles/<steamid64>/tradeoffers and the like), exactly as Steam's own
 --- click handlers build them; the frontend has no filesystem, so this end
 --- supplies the id.
+---
+--- Millennium's own answer for the Steam directory comes first: the registry
+--- SteamPath on Windows, ~/.steam/steam/ on Linux (Millennium documents that
+--- it need not be where Millennium itself lives, which is fine; the file
+--- belongs to Steam). The hard-coded Linux locations stay as the fallback
+--- for a Millennium that predates steam_path or answers with nothing.
+local function loginusers_candidates()
+    local candidates = {}
+    local ok, steam = pcall(function() return millennium.steam_path() end)
+    if ok and type(steam) == "string" and steam ~= "" then
+        steam = steam:gsub("[/\\]+$", "")
+        candidates[#candidates + 1] = steam .. SEP .. "config" .. SEP .. "loginusers.vdf"
+    end
+    if not IS_WINDOWS then
+        local home = os.getenv("HOME") or ""
+        candidates[#candidates + 1] = home .. "/.steam/steam/config/loginusers.vdf"
+        candidates[#candidates + 1] = home .. "/.local/share/Steam/config/loginusers.vdf"
+    end
+    return candidates
+end
+
 local function most_recent_steamid()
-    local candidates = {
-        (os.getenv("HOME") or "") .. "/.steam/steam/config/loginusers.vdf",
-        (os.getenv("HOME") or "") .. "/.local/share/Steam/config/loginusers.vdf",
-    }
-    for _, path in ipairs(candidates) do
+    for _, path in ipairs(loginusers_candidates()) do
         local handle = io.open(path, "r")
         if handle then
             local current, fallback = nil, nil

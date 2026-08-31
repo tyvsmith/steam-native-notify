@@ -36,9 +36,14 @@ end
 -- so a stub installed afterwards would never be seen. assets.read serves the
 -- real helper from the repo, standing in for the copy packed into the .star.
 local stored = {}
+-- steam_path answers with a throwaway Steam directory; a test that needs a
+-- loginusers.vdf writes one there. Empty by default, so Identity falls
+-- through to the machine's real candidates exactly as before.
+local steam_dir = tmp_cache .. "/steam"
 package.preload["millennium"] = function()
 	return {
 		ready = function() end,
+		steam_path = function() return steam_dir .. "/" end,
 		config = {
 			get = function(k) return stored[k] end,
 			set = function(k, v) stored[k] = v end,
@@ -213,6 +218,32 @@ check("Identity returns JSON", type(id_json) == "string" and id_json:sub(1, 1) =
 if type(id_json) == "string" and id_json:find("steamid64") then
 	check("Identity id is a steamid64", id_json:find('"7656119%d%d%d%d%d%d%d%d%d%d"') ~= nil, id_json)
 end
+
+-- With a loginusers.vdf under Millennium's steam_path, that file wins over
+-- the hard-coded locations (steam_path answers with a trailing slash, as
+-- Millennium's Linux build does). Two users, MostRecent on the second.
+io.popen("mkdir -p '" .. steam_dir .. "/config'"):close()
+local vdf = assert(io.open(steam_dir .. "/config/loginusers.vdf", "w"))
+vdf:write([[
+"users"
+{
+	"76561198000000001"
+	{
+		"AccountName"		"first"
+		"MostRecent"		"0"
+	}
+	"76561198000000002"
+	{
+		"AccountName"		"second"
+		"MostRecent"		"1"
+	}
+}
+]])
+vdf:close()
+ok, id_json = pcall(Identity)
+check("Identity reads loginusers.vdf under millennium.steam_path first",
+	ok and id_json == '{"steamid64":"76561198000000002"}', tostring(id_json))
+os.remove(steam_dir .. "/config/loginusers.vdf")
 
 -- TakeDevCommand: consume-once semantics against the runtime cache directory
 -- (created by on_load above), the same place tools/fire writes.
