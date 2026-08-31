@@ -236,28 +236,46 @@ end
 --- click handlers build them; the frontend has no filesystem, so this end
 --- supplies the id.
 ---
---- Millennium's own answer for the Steam directory comes first: the registry
---- SteamPath on Windows, ~/.steam/steam/ on Linux (Millennium documents that
---- it need not be where Millennium itself lives, which is fine; the file
---- belongs to Steam). The hard-coded Linux locations stay as the fallback
---- for a Millennium that predates steam_path or answers with nothing.
-local function loginusers_candidates()
-    local candidates = {}
+--- Millennium's own answer for the Steam directory, or nil. The registry
+--- SteamPath on Windows, ~/.steam/steam/ on Linux, and on macOS the app
+--- bundle's MacOS directory, which is not where Steam keeps its data.
+--- Millennium documents that it need not be where Millennium itself lives,
+--- which is fine; the files wanted here belong to Steam.
+local function millennium_steam_dir()
     local ok, steam = pcall(function() return millennium.steam_path() end)
     if ok and type(steam) == "string" and steam ~= "" then
-        candidates[#candidates + 1] = join(steam, "config", "loginusers.vdf")
+        return (steam:gsub("[/\\]+$", ""))
     end
-    if not IS_WINDOWS then
-        local home = os.getenv("HOME") or ""
-        candidates[#candidates + 1] = home .. "/.steam/steam/config/loginusers.vdf"
-        candidates[#candidates + 1] = home .. "/.local/share/Steam/config/loginusers.vdf"
+    return nil
+end
+
+--- Every directory Steam's data (config/, appcache/) may live in on this
+--- platform, most authoritative first; the caller takes the first that has
+--- the file it wants. Millennium's answer leads. Linux then tries the native
+--- locations before Steam's Flatpak per-app directory as the host sees it
+--- (inside the sandbox $HOME-relative paths already resolve there through
+--- --persist=., so the native entries cover that case too). macOS adds the
+--- Application Support data directory the bundle answer leaves out. Windows
+--- has no guess: the registry is the only source, and Millennium reads it.
+local function steam_dir_candidates()
+    local dirs = { millennium_steam_dir() }
+    if IS_WINDOWS then return dirs end
+    local home = os.getenv("HOME") or ""
+    if IS_MACOS then
+        dirs[#dirs + 1] = join(home, "Library", "Application Support", "Steam")
+        return dirs
     end
-    return candidates
+    dirs[#dirs + 1] = join(home, ".steam", "steam")
+    dirs[#dirs + 1] = join(home, ".local", "share", "Steam")
+    local flatpak = join(home, ".var", "app", "com.valvesoftware.Steam")
+    dirs[#dirs + 1] = join(flatpak, ".local", "share", "Steam")
+    dirs[#dirs + 1] = join(flatpak, ".steam", "steam")
+    return dirs
 end
 
 local function most_recent_steamid()
-    for _, path in ipairs(loginusers_candidates()) do
-        local handle = io.open(path, "r")
+    for _, dir in ipairs(steam_dir_candidates()) do
+        local handle = io.open(join(dir, "config", "loginusers.vdf"), "r")
         if handle then
             local current, fallback = nil, nil
             for line in handle:lines() do
@@ -282,6 +300,27 @@ end
 ---@return string
 function Identity()
     return json.encode({ steamid64 = most_recent_steamid() })
+end
+
+--- The helper resolves game art under <steam>/appcache/librarycache, and
+--- only this end can ask Millennium where <steam> is. Handed over in a file
+--- rather than on the command line, so the five-argument spawn string stays
+--- what it is on every platform (a Windows wrapper reads the same file).
+--- Rewritten at every load, removed when Millennium has no answer, so the
+--- helper never reads a stale one; the helper keeps its own guesses for a
+--- missing file and a directory that holds no library cache.
+local STEAM_DIR_FILE = join(RUNTIME_DIR, "steam-dir")
+local function publish_steam_dir()
+    local steam = millennium_steam_dir()
+    if steam then
+        local handle = io.open(STEAM_DIR_FILE, "w")
+        if handle then
+            handle:write(steam, "\n")
+            handle:close()
+            return
+        end
+    end
+    os.remove(STEAM_DIR_FILE)
 end
 
 --- Consume-once file handoff: the file is deleted before its content is
@@ -326,6 +365,7 @@ local function on_load()
         .. " runtime: " .. RUNTIME_DIR)
 
     migrate_legacy_settings()
+    publish_steam_dir()
 
     -- The helper is only materialized where it can deliver. On Windows it is
     -- useless (it is sh); on macOS it would run and stop at the missing

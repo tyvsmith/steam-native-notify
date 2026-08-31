@@ -245,6 +245,49 @@ check("Identity reads loginusers.vdf under millennium.steam_path first",
 	ok and id_json == '{"steamid64":"76561198000000002"}', tostring(id_json))
 os.remove(steam_dir .. "/config/loginusers.vdf")
 
+-- The same steam_path answer is published for the helper at load, trimmed
+-- of its trailing slash, as one line in the runtime directory.
+check("load publishes steam_path for the helper",
+	slurp(tmp_cache .. "/steam-native-notify/steam-dir") == steam_dir .. "\n",
+	tostring(slurp(tmp_cache .. "/steam-native-notify/steam-dir")))
+
+-- With nothing under steam_path, the Linux guesses run native first
+-- (~/.steam/steam, then ~/.local/share/Steam), then Steam's Flatpak per-app
+-- directory as the host sees it. HOME moves to a throwaway directory so the
+-- machine's real loginusers.vdf stays out of it.
+local guess_home = tmp_cache .. "/home"
+os.getenv = function(name)
+	if name == "XDG_CACHE_HOME" then return tmp_cache end
+	if name == "HOME" then return guess_home end
+	return real_getenv(name)
+end
+local function write_loginusers(dir, id)
+	io.popen("mkdir -p '" .. dir .. "/config'"):close()
+	local f = assert(io.open(dir .. "/config/loginusers.vdf", "w"))
+	f:write('"users"\n{\n\t"' .. id .. '"\n\t{\n\t\t"MostRecent"\t\t"1"\n\t}\n}\n')
+	f:close()
+end
+write_loginusers(guess_home .. "/.var/app/com.valvesoftware.Steam/.steam/steam", "76561198000000011")
+ok, id_json = pcall(Identity)
+check("Identity falls back to the Flatpak per-app ~/.steam/steam",
+	ok and id_json == '{"steamid64":"76561198000000011"}', tostring(id_json))
+write_loginusers(guess_home .. "/.var/app/com.valvesoftware.Steam/.local/share/Steam", "76561198000000012")
+ok, id_json = pcall(Identity)
+check("Identity prefers the Flatpak per-app ~/.local/share/Steam",
+	ok and id_json == '{"steamid64":"76561198000000012"}', tostring(id_json))
+write_loginusers(guess_home .. "/.local/share/Steam", "76561198000000013")
+ok, id_json = pcall(Identity)
+check("Identity prefers a native ~/.local/share/Steam over the Flatpak ones",
+	ok and id_json == '{"steamid64":"76561198000000013"}', tostring(id_json))
+write_loginusers(guess_home .. "/.steam/steam", "76561198000000014")
+ok, id_json = pcall(Identity)
+check("Identity prefers a native ~/.steam/steam over everything but steam_path",
+	ok and id_json == '{"steamid64":"76561198000000014"}', tostring(id_json))
+os.getenv = function(name)
+	if name == "XDG_CACHE_HOME" then return tmp_cache end
+	return real_getenv(name)
+end
+
 -- TakeDevCommand: consume-once semantics against the runtime cache directory
 -- (created by on_load above), the same place tools/fire writes.
 local fire = assert(io.open(tmp_cache .. "/steam-native-notify/.dev-fire", "w"))
@@ -665,6 +708,18 @@ mac_click:close()
 ok, taken = pcall(TakeClick)
 check("macos: TakeClick reads the runtime directory",
 	ok and taken == "1756500000|replay:notificationtoasts_4_desktop", tostring(taken))
+
+-- Identity: steam_path answers the bundle (no config/ there), so the
+-- Application Support data directory is the one that answers.
+io.popen("mkdir -p '" .. mac_support .. "/config'"):close()
+local mac_vdf = assert(io.open(mac_support .. "/config/loginusers.vdf", "w"))
+mac_vdf:write('"users"\n{\n\t"76561198000000004"\n\t{\n\t\t"MostRecent"\t\t"1"\n\t}\n}\n')
+mac_vdf:close()
+ok, id_json = pcall(Identity)
+check("macos: Identity reads loginusers.vdf under Library/Application Support",
+	ok and id_json == '{"steamid64":"76561198000000004"}', tostring(id_json))
+check("macos: load publishes the bundle steam_path for the helper",
+	slurp(mac_runtime .. "/steam-dir") == steam_dir .. "\n", tostring(slurp(mac_runtime .. "/steam-dir")))
 
 jit = nil
 steam_dir = tmp_cache .. "/steam"
