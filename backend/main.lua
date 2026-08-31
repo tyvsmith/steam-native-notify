@@ -15,7 +15,7 @@ local APP_NAME = "Steam"
 -- Millennium's host is LuaJIT and opens the standard libraries, so the jit
 -- table should be there), falling back to the SystemVersion.plist every
 -- macOS carries when no jit table is exposed. Every path and spawn below
--- branches on these, nothing else asks the OS. docs/windows-plan.md is the
+-- branches on these, nothing else asks the OS. docs/platforms.md is the
 -- plan for the platforms that do not deliver yet.
 local SEP = (type(package) == "table" and type(package.config) == "string")
     and package.config:sub(1, 1) or "/"
@@ -97,7 +97,7 @@ end
 --- POSIX single-quote escaping: end the quote, add an escaped quote, reopen.
 --- Everything else inside single quotes is literal, so this is sufficient.
 --- POSIX only: cmd.exe and PowerShell quote differently, and the Windows
---- branch of spawn_helper brings its own (docs/windows-plan.md).
+--- branch of spawn_helper brings its own (docs/platforms.md).
 local function shell_quote(value)
     local escaped = tostring(value):gsub("'", "'\\''")
     return "'" .. escaped .. "'"
@@ -137,12 +137,12 @@ end
 --- runtime's system(), which runs cmd.exe, and from Millennium's
 --- GUI-subsystem Lua host that allocates a console window per notification.
 --- The design (a PowerShell wrapper around snoretoast.exe, started without a
---- console) is docs/windows-plan.md.
+--- console) is docs/platforms.md.
 ---
 --- macOS: not implemented. sh is there but notify-send and gdbus are not;
 --- the helper would fail on its own, and does so loudly, but nothing is
 --- gained by spawning it. The delivery design (terminal-notifier or alerter)
---- is docs/windows-plan.md.
+--- is docs/platforms.md.
 ---
 --- Until either lands this logs and returns false, so an install on those
 --- platforms fails in the log rather than in silence.
@@ -378,7 +378,7 @@ local function on_load()
     -- so neither end is ever silent.
     if IS_WINDOWS or IS_MACOS then
         log_line("error", "desktop delivery is not implemented on " .. PLATFORM
-            .. " -- notifications will not be delivered (docs/windows-plan.md)")
+            .. " -- notifications will not be delivered (docs/platforms.md)")
     else
         local helper, err = install_helper()
         if helper then

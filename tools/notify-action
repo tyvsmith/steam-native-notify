@@ -24,7 +24,7 @@
 #
 # Linux only, today: notify-send and gdbus are FreeDesktop tools. The paths
 # below already know the Flatpak and macOS layouts; the delivery half for
-# those platforms is planned in docs/windows-plan.md, and an unsupported
+# those platforms is planned in docs/platforms.md, and an unsupported
 # platform is refused in the log, never silently.
 
 set -u
@@ -243,7 +243,7 @@ if [ "${1:-}" = "--daemon-caps" ]; then
 fi
 
 # Delivery needs notify-send and the FreeDesktop daemon behind it. macOS has
-# neither (its delivery is a plan, docs/windows-plan.md), and a Linux box can
+# neither (its delivery is a plan, docs/platforms.md), and a Linux box can
 # lack libnotify. Either is said in the backend's session log, where
 # tools/capture looks, before this exits: a dropped notification is never
 # silent. After the seams above, which are portable and need no daemon.
@@ -253,7 +253,7 @@ refuse() {
 	exit 1
 }
 case $(uname -s 2>/dev/null) in
-Darwin) refuse "unsupported platform: macos delivery is not implemented (docs/windows-plan.md), notification dropped" ;;
+Darwin) refuse "unsupported platform: macos delivery is not implemented (docs/platforms.md), notification dropped" ;;
 esac
 command -v notify-send >/dev/null 2>&1 \
 	|| refuse "notify-send not found on PATH (install libnotify), notification dropped"

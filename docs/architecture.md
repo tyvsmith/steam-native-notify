@@ -13,7 +13,9 @@ every type number to a name and what Steam's click does;
 `docs/experiments/click-replay.md` is the measured record behind the replay
 design, including its incidents; `docs/regeneration.md` is how to bring back
 the two removed subsystems (the hand-built routing catalog and the protobuf
-schema), preserved whole on branch `backup/routing-catalog`.
+schema), preserved whole on branch `backup/routing-catalog`;
+`docs/platforms.md` is the platform support matrix (the paths and calls
+that differ per OS, and the delivery plan where nothing delivers yet).
 
 ## The pipeline
 
@@ -79,9 +81,11 @@ nothing survives a Steam restart.
 
 ### Log vocabulary
 
-All in `~/.cache/steam-native-notify/plugin.log`, truncated at each backend
+All in `~/.cache/steam-native-notify/plugin.log` (the Linux runtime
+directory; `docs/platforms.md` has the others), truncated at each backend
 load (Millennium buffers a packed plugin's logger output away from Steam's
-console log, so the backend mirrors every line there itself):
+console log, so the backend mirrors every line there itself). The helper
+appends there too when it refuses a platform:
 
 | line | meaning |
 |---|---|
@@ -97,6 +101,9 @@ console log, so the backend mirrors every line there itself):
 | `click-bridge: stale click dropped (Ns old)` | consumed but older than 30s; dropped by design |
 | `replay: invoke <name> onClick@D age=Ns` then `-> returned without throwing` | the click ran |
 | `replay: invoke ... -> no stash entry / expired / THREW ...` | why it did not |
+| `platform: <linux\|macos\|windows> [flatpak: <id>] runtime: <dir>` | the backend's answer at load; `docs/platforms.md` |
+| `unsupported platform: <os> delivery is not implemented, notification dropped` | the backend refused to spawn (macOS, Windows) |
+| `notify-action: unsupported platform ...` / `notify-action: notify-send not found ...` | the helper refused before delivery |
 
 Every reflective failure is fail-closed: the worst case is a notification
 that arrives unclickable, never a missing notification and never a wrong
@@ -129,7 +136,10 @@ action.
   incoming voice chat renders as `notificationtoasts_10000_desktop` and
   produces no `RegisterForNotifications` event at all.
 - Toast artwork: `steamloopback.host/assets/<appid>/<file>` maps to
-  `~/.local/share/Steam/appcache/librarycache/<appid>/<file>`; friend avatars
+  `<steam>/appcache/librarycache/<appid>/<file>`, where `<steam>` is the
+  directory the backend publishes from `millennium.steam_path()`
+  (`~/.steam/steam` on native Linux, a link to `~/.local/share/Steam`) or
+  the helper's per-platform guess (`docs/platforms.md`); friend avatars
   are public CDN URLs, fetched once and cached by notify-action. The fetch
   runs curl with `LD_LIBRARY_PATH`/`LD_PRELOAD` cleared — the helper inherits
   Steam's loader environment, whose pinned_libs_64 libcurl the system curl
