@@ -75,12 +75,13 @@ the vocabulary table is in `docs/architecture.md`.
   not supported by Millennium itself; the plugin's paths already know the
   Flatpak layout, but nothing has run there. On macOS the backend loads,
   logs that delivery is not implemented, and delivers nothing.
-- **Windows delivery is EXPERIMENTAL and has not been validated on real
-  hardware.** The pieces ship (WinRT toasts through a PowerShell helper,
-  clicks through a per-user `snn:` URI scheme; no vendored binaries, all
-  registration per-user and reversible), the plugin says so in its log at
-  load, and `docs/platforms.md` lists the validation pass it still needs.
-  Treat any Windows behaviour as unverified until that pass has run.
+- **Windows support is in progress: EXPERIMENTAL and unverified.** The
+  pieces ship (WinRT toasts through a PowerShell helper, clicks through a
+  per-user `snn:` URI scheme; no vendored binaries, all registration
+  per-user and reversible), but none of it has run on real Windows hardware
+  yet. The plugin says so in its log at load, and `docs/platforms.md` lists
+  the validation pass that gates the mark. Treat every Windows behaviour as
+  unverified until that pass has run.
 - The 64-bit SteamRT3 client does not work: Millennium installs and reports
   success there, but its hook does nothing
   ([Millennium #840](https://github.com/SteamClientHomebrew/Millennium/issues/840)).
