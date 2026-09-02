@@ -107,7 +107,10 @@ if (-not $Id) { exit 2 }
 $NotifyFile = Join-Path $RuntimeDir "$Id.notify"
 if (-not (Test-Path -LiteralPath $NotifyFile)) { exit 1 }
 try {
-    $Payload = Get-Content -LiteralPath $NotifyFile -Raw | ConvertFrom-Json
+    # The backend writes the payload as UTF-8; Windows PowerShell 5.1 reads
+    # ANSI unless told otherwise, which mangled every non-ASCII character
+    # (an em dash rendered as three bytes of mojibake on a real toast).
+    $Payload = Get-Content -LiteralPath $NotifyFile -Raw -Encoding UTF8 | ConvertFrom-Json
 } catch {
     Write-PluginLog "payload $Id unreadable, notification dropped: $($_.Exception.Message)"
     Remove-Item -LiteralPath $NotifyFile -Force -ErrorAction SilentlyContinue
