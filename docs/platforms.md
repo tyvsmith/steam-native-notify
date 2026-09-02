@@ -14,7 +14,7 @@ or **unverified**. Nothing here has run anywhere but native Linux.
 | Linux, native Steam | **shipped** | `notify-send` to the FreeDesktop daemon | `default` action, `.click` file, bridge |
 | Linux, Flatpak Steam | paths ready; the host is unsupported by Millennium | same helper; inside the sandbox libnotify routes through the notification portal (plan) | same file contract; portal semantics unverified |
 | macOS | backend paths ready; delivery refused, loudly | terminal-notifier `-execute` (plan) | `-execute` writes `.click` (plan) |
-| Windows | **EXPERIMENTAL**: delivery shipped, unvalidated on real hardware | WinRT toast via notify-action.ps1 (Windows PowerShell 5.1, no vendored binary) | protocol activation: the snn: URI scheme's handler writes `.click` |
+| Windows | **display shipped and validated on real hardware** (Win11); clicks are a known gap | WinRT toast via notify-action.ps1 (Windows PowerShell 5.1, no vendored binary): branding, artwork, re-encode all working | **none yet** -- registry-only protocol activation does not fire on click (validated); needs a compiled COM activator |
 
 Refused (macOS today) means: the backend loads, logs `desktop delivery is
 not implemented on <platform>` at load and `unsupported platform: <platform>
@@ -524,30 +524,61 @@ earlier.
   Assist per app -- the documented answer to in-game suppression. Not sent
   yet; first candidate once validation passes.
 
-### Validation pass (the gate out of EXPERIMENTAL; about one sitting)
+### Validation results (Windows 11, real hardware, 2026-09-01)
 
-Order matters: the first two decide the design, the rest exercise it.
+Run in a dockur/windows Win11 Pro VM, Millennium 3.5.0-beta.2, Steam client.
 
-1. `pcall(require, "ffi")` in the plugin backend -- the load log already
-   answers it. Missing: fall back to a resident helper (one console flash
-   per session) or an upstream utils.spawn; stop here.
-2. A protocol toast with no stub CLSID: click the banner, confirm the snn:
-   handler ran (`.click` appears). The whole click design rests on this
-   one experiment.
-3. The toast appears, branded "Steam" with the extracted icon
-   (registry-only AUMID).
-4. Library-cache art and a CDN avatar both render; an oversized JPEG
-   re-encodes rather than vanishing.
-5. Click -> `.click` -> bridge consumes -> `replay: invoke` in the log,
-   with Steam focused.
-6. hideSteamToast: Steam's own toast closes only after `Notify` answers
-   "ok"; on a failed spawn it stays open.
-7. Action Center: does the toast persist, and does a click there still
-   protocol-activate? Expected to need the stub-CLSID registration; if so
-   it is one more HKCU key in -Setup.
-8. Focus Assist on, game fullscreen: confirm suppression, then retest with
-   `scenario="urgent"`.
-9. `-Teardown` leaves no keys and no icon behind.
+1. `pcall(require, "ffi")` -- **PASS.** The load line reads `setup: AUMID
+   branding and snn: scheme registered`, which the PowerShell helper only
+   writes after the backend's `ffi` `CreateProcessW` spawn ran it. The
+   whole spawn design is confirmed on hardware.
+2. Toast display -- **PASS.** Branded "Steam" with the icon extracted from
+   the user's own steam.exe; a friend avatar (circle-cropped), Aircar
+   library art, and an achievement image from the community CDN all
+   rendered. The dev-fire path (`.dev-fire` -> Steam test method ->
+   captured toast -> `.notify` -> helper -> `Show()`) works end to end.
+3. UTF-8 -- **FIXED (c540ce2).** PowerShell 5.1 read the payload as ANSI, so
+   an em dash arrived as mojibake ("Aircar â€”"). The helper now reads it
+   `-Encoding UTF8`.
+4. The click handler and the snn: scheme in isolation -- **PASS.**
+   `wscript click-handler.js "snn:replay/x"` and `Start-Process
+   "snn:replay/x"` both write the stamped `.click`, and the armed bridge
+   consumes it (`click-bridge: replay:x -> replay: invoke ... no stash
+   entry`, correctly refusing a fake name). The transport is sound.
+5. Click from a real toast -- **FAIL, and this is the finding.** A banner
+   click, and a click in the Action Center, produce no `click-bridge` line:
+   Windows fires no activation. The toast is received (it dismisses on
+   click) but the `activationType="protocol"` launch never runs. Tested
+   registry-only three ways: snn scheme alone; plus a `CustomActivator`
+   GUID on the AUMID; plus a stub `CLSID\{guid}` key. None activated, while
+   Windows Defender's own toasts (a registered app with a real activator)
+   activate normally.
+
+**Conclusion:** an unpackaged, binary-free sender cannot get toast-click
+activation on Windows 11. Toast activation of any kind -- protocol
+included -- routes through a registered COM activator: a `LocalServer32`
+executable implementing `INotificationActivationCallback`. A plain
+`wscript`/URI-scheme handler cannot stand in for it (Windows CoCreates the
+server and waits for a class factory, which a script never registers). This
+is the one thing the plan could not settle without hardware; it is settled.
+
+Windows therefore ships **display-only**: notifications appear, branded, with
+artwork, and persist in the Action Center -- the whole out-of-game value.
+Clicking a Windows toast does nothing (documented). The snn: scheme and the
+click handler stay registered, harmless and forward-compatible, so the day a
+small activator binary is added the click path lights up with no other
+change.
+
+### Remaining Windows work (clicks, deferred)
+
+- a compiled COM activator (a ~50-line C++ `LocalServer32` exe, or SnoreToast
+  used purely as the activator) that receives `INotificationActivationCallback`
+  and writes the same `.click` line. This reintroduces a vendored binary,
+  which is the tradeoff the display-only v1 avoids.
+- once clicks work: `scenario="urgent"` to break Focus Assist during
+  fullscreen games, and the `hideSteamToast` interaction re-checked on
+  Windows (the gate itself is validated on Linux).
+- `-Teardown` leaves no keys or icon behind (untested; low risk).
 
 ### Open questions
 

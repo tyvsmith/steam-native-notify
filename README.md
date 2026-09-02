@@ -76,13 +76,15 @@ the vocabulary table is in `docs/architecture.md`.
   not supported by Millennium itself; the plugin's paths already know the
   Flatpak layout, but nothing has run there. On macOS the backend loads,
   logs that delivery is not implemented, and delivers nothing.
-- **Windows support is in progress: EXPERIMENTAL and unverified.** The
-  pieces ship (WinRT toasts through a PowerShell helper, clicks through a
-  per-user `snn:` URI scheme; no vendored binaries, all registration
-  per-user and reversible), but none of it has run on real Windows hardware
-  yet. The plugin says so in its log at load, and `docs/platforms.md` lists
-  the validation pass that gates the mark. Treat every Windows behaviour as
-  unverified until that pass has run.
+- **Windows support is EXPERIMENTAL and display-only.** Notifications work,
+  validated on real Windows 11: WinRT toasts through a PowerShell helper,
+  branded "Steam" with the artwork, persisting in the Action Center; no
+  vendored binaries, every registration per-user and reversible. **Clicking a
+  Windows toast does nothing** — an unpackaged, binary-free sender cannot get
+  toast-click activation on Windows (it needs a compiled COM activator);
+  `docs/platforms.md` records the validation and the deferred click work. The
+  in-game half is further limited by Focus Assist, which suppresses toasts
+  during fullscreen games by default.
 - The 64-bit SteamRT3 client does not work: Millennium installs and reports
   success there, but its hook does nothing
   ([Millennium #840](https://github.com/SteamClientHomebrew/Millennium/issues/840)).
