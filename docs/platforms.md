@@ -565,25 +565,54 @@ left behind.
 
 ### The focus limitation
 
-A click updates the Steam window but does not bring it forward when Steam is
-already open behind other windows. This is a Windows rule, not a plugin gap:
+A click updates Steam's window but does not bring it forward when Steam is
+already open behind other windows -- and does not foreground a cold-started
+Steam either. This is a Win32 rule, not a plugin gap, and no notification
+setting can change it.
 
-- Steam's own `steam://open/friends`, activated from a toast with no plugin
-  involved, also fails to raise an already-open window -- and does come
-  forward when Steam is closed to the tray, because presenting a new window
-  is allowed where raising a background one is not.
-- Every lever Steam's own API offers was tried from the main window's own
-  context (`SP Desktop_uid0`, found through `g_PopupManager`):
-  `BringToFront(AndForceOS)`, `MarkLastFocused`, `SetKeyFocus`, `ShowWindow`,
-  and a `HideWindow`+`ShowWindow` re-present. All ran; none took the
-  foreground. `FlashWindow` is absent from this client build.
-- Steam's own toast escapes the rule only because clicking it is input on a
-  Steam-owned window, which makes Steam the foreground process.
+**Why.** Windows grants the right to call `SetForegroundWindow` to the
+process the shell activates, and it cannot be taken by anyone else -- Raymond
+Chen, [foreground activation permission is like love](https://devblogs.microsoft.com/oldnewthing/20090220-00/?p=19083):
+"You can't steal it, it has to be given to you." A toast click activates
+`steam.exe -- "%1"`, which forwards the URL to the resident client over IPC
+and exits, so the grant dies with the messenger process. Chromium solves the
+identical problem in its own single-instance path by calling
+`AllowSetForegroundWindow(running_pid)` before forwarding
+([chrome_process_finder.cc](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/chrome/browser/win/chrome_process_finder.cc));
+Steam does not. The cold-start case fails too: the grant is revoked by the
+next unrelated user input, and Steam takes many seconds to render a window
+that a grandchild `steamwebhelper.exe` owns.
 
-`raiseSteamWindow` (frontend/replay.ts) still makes the quiet calls: they cost
-nothing and do work in the tray case, where `steam://open/main` creates the
-window. `RAISE_BY_REPRESENTING` is the flicker experiment, left `false` with
-the measurement recorded next to it.
+**Nothing on the notification can affect it.** `<toast>` has exactly five
+attributes (`launch`, `duration`, `displayTimestamp`, `scenario`,
+`useButtonStyle`) and none touches activation focus; no notification API
+accepts a window handle, so a toast can name an app identity but never a
+window. **Verified:** [toast schema](https://learn.microsoft.com/en-us/uwp/schemas/tiles/toastschema/element-toast),
+[SetForegroundWindow remarks](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow).
+
+**Nothing inside Steam can do it either**, which one round of work here proved
+the expensive way: `BringToFront(AndForceOS)`, `MarkLastFocused`,
+`SetKeyFocus`, `ShowWindow` and a `HideWindow`+`ShowWindow` re-present were
+all called from the main window's own context (`SP Desktop_uid0`, found
+through `g_PopupManager`) and none took the foreground. `FlashWindow` is
+absent from this client build. Those calls are gone; `raiseSteamWindow` now
+only opens the window when there is none, which `steam://open/` does do
+(`steam://nav/` is documented as explicitly non-activating).
+
+**What would work, if it is ever worth it.** A COM activator: register
+`CustomActivator` on the existing AUMID plus `CLSID\{guid}\LocalServer32`,
+switch the toast to `activationType="foreground"`, and in `Activate()` do
+Chromium's recipe -- `SendInput` a zeroed key down/up (to satisfy "received
+the last input event"), `AllowSetForegroundWindow(pid owning Steam's HWND)`,
+`SetForegroundWindow(hwnd)`, then fire the replay navigation last so it does
+not undo the raise. Chrome ships exactly this, unpackaged, in HKCU. The cost
+is a compiled out-of-process COM server -- the vendored binary this design
+avoids -- and even Chromium's own comment admits the hand-off "fails at an
+alarming rate"
+([notification_activator.cc](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/chrome/notification_helper/notification_activator.cc)).
+Deliberately not built. `AttachThreadInput` hangs, `SwitchToThisWindow`
+grants no bypass, and the `ForegroundLockTimeout` tweak is a system-wide
+setting reported dead on Windows 11.
 
 ### Remaining Windows work
 

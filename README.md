@@ -81,11 +81,12 @@ the vocabulary table is in `docs/architecture.md`.
   branded "Steam" with the artwork, persisting in the Action Center — and so
   do clicks: a click replays Steam's own handler and lands where Steam would.
   No vendored binaries; every registration is per-user and reversible. One
-  documented limitation: if the Steam window is already open behind other
-  windows it updates *behind* them. Windows refuses to let a background
-  process take the foreground on an external activation, and Steam's own
-  `steam://` activation behaves identically, so this is an OS rule rather
-  than a plugin gap. From the tray, Steam comes forward normally. The
+  documented limitation: the Steam window does not come to the foreground on
+  a click — it updates behind whatever window has focus. Windows gives the
+  right to raise a window only to the process it activates, that process is a
+  short-lived `steam.exe` that forwards the URL and exits, and Steam's own
+  `steam://` activation behaves identically. `docs/platforms.md` records what
+  was tried and what would be needed. The
   in-game half is further limited by Focus Assist, which suppresses toasts
   during fullscreen games by default.
 - The 64-bit SteamRT3 client does not work: Millennium installs and reports
