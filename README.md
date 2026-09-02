@@ -22,20 +22,31 @@ inside Steam's UI.
 ## Install
 
 Requires [Millennium](https://steambrew.app) >= v3.5 (the `.star` plugin
-format) and [Bun](https://bun.com).
+format) and [Bun](https://bun.com). There is no tagged release yet, so build
+from a checkout:
 
 ```sh
 bun install
 bun run build
 ```
 
-The build packs the plugin into
-`~/.local/share/millennium/plugins/me.tysmith.steam-native-notify.star`, so
-building is installing. Restart Steam, then enable **Steam Native Notify**
-under Millennium > Plugins. After rebuilding, restart Steam fully:
-`plugin.restart` and disable/enable leave the plugin stopped.
+Building **is** installing: starlight packs the plugin and writes it straight
+into Millennium's plugins directory —
+`~/.local/share/millennium/plugins/` on Linux, and
+`<Steam>\millennium\plugins\` on Windows (the Steam path comes from the
+registry). Then restart Steam and enable **Steam Native Notify** under
+Millennium > Plugins. After any rebuild, restart Steam fully: `plugin.restart`
+and disable/enable leave the plugin stopped.
 
-Runtime dependencies: `notify-send`, `curl`, `steam`, `sh`.
+The packed `.star` is platform-independent, so it can also be built on one
+machine and copied into the other's plugins directory — which is how the
+Windows support was developed and tested.
+
+Runtime dependencies: Linux needs `notify-send`, `curl`, `steam` and `sh`;
+Windows needs only what it ships with (Windows PowerShell 5.1 — *not* pwsh 7,
+which cannot use the WinRT notification APIs). The plugin registers its
+Windows toast identity per-user at load, and
+`notify-action.ps1 -Teardown` removes it.
 
 ## Settings
 
