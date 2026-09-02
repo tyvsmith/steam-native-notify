@@ -751,8 +751,6 @@ check("windows: load marks delivery experimental", win_experimental)
 check("windows: the PowerShell helper is materialized", win_helper)
 check("windows: helper matches the packed asset",
 	slurp(win_runtime .. "\\notify-action.ps1") == slurp(root .. "/tools/notify-action.ps1"))
-check("windows: click handler matches the packed asset",
-	slurp(win_runtime .. "\\click-handler.js") == slurp(root .. "/tools/click-handler.js"))
 -- This runner is PUC Lua: require("ffi") fails, so setup must degrade to a
 -- log line, never a load failure.
 check("windows: setup failure without ffi is logged", win_setup_failed)

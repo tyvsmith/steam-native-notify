@@ -5,7 +5,8 @@ where the plugin stands on each, what already branches per platform in the
 code, and the plan for the platforms that do not deliver yet. Written to be
 pasted into tracking issues. Every platform-specific claim carries a source
 and a status: **verified** against a primary source (its own docs or code),
-or **unverified**. Nothing here has run anywhere but native Linux.
+or **unverified**. Linux and Windows have both run on real hardware; macOS
+has not.
 
 ## Matrix
 
@@ -14,7 +15,7 @@ or **unverified**. Nothing here has run anywhere but native Linux.
 | Linux, native Steam | **shipped** | `notify-send` to the FreeDesktop daemon | `default` action, `.click` file, bridge |
 | Linux, Flatpak Steam | paths ready; the host is unsupported by Millennium | same helper; inside the sandbox libnotify routes through the notification portal (plan) | same file contract; portal semantics unverified |
 | macOS | backend paths ready; delivery refused, loudly | terminal-notifier `-execute` (plan) | `-execute` writes `.click` (plan) |
-| Windows | **display shipped and validated on real hardware** (Win11); clicks are a known gap | WinRT toast via notify-action.ps1 (Windows PowerShell 5.1, no vendored binary): branding, artwork, re-encode all working | **none yet** -- registry-only protocol activation does not fire on click (validated); needs a compiled COM activator |
+| Windows | **shipped and validated on real hardware** (Win11), EXPERIMENTAL | WinRT toast via notify-action.ps1 (Windows PowerShell 5.1, no vendored binary): branding, artwork, re-encode | toast launches `steam://snn/replay/<toast>`; Steam dispatches it to frontend/steamurl.ts, which replays the stashed handler |
 
 Refused (macOS today) means: the backend loads, logs `desktop delivery is
 not implemented on <platform>` at load and `unsupported platform: <platform>
@@ -41,16 +42,15 @@ slots (`title body image route ingame`) are the contract on every platform.
 | runtime directory | `$XDG_CACHE_HOME/steam-native-notify` (`~/.cache/...`) | `$XDG_CACHE_HOME` is `~/.var/app/com.valvesoftware.Steam/cache` there, so `.../cache/steam-native-notify` | `~/Library/Caches/steam-native-notify` | `%LOCALAPPDATA%\steam-native-notify` |
 | `millennium.steam_path()` | `~/.steam/steam/` | `~/.steam/steam/` (resolves inside the sandbox) | `~/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS` | `HKCU\Software\Valve\Steam\SteamPath` |
 | Steam data guesses, after `steam_path()` | `~/.steam/steam`, `~/.local/share/Steam`, then `~/.var/app/com.valvesoftware.Steam/{.local/share/Steam,.steam/steam}` | the same list; `$HOME`-relative entries resolve through `--persist=.` | `~/Library/Application Support/Steam` | none: the registry is the only source |
-| helper spawn | `sh <helper> ... >/dev/null 2>&1 &` | same | same call would work; refused until the helper has a macOS branch | `ffi` `CreateProcessW` with `CREATE_NO_WINDOW`, payload in a `<id>.notify` file (EXPERIMENTAL) |
-| helper | `tools/notify-action` (POSIX sh, notify-send) | same, through the portal | Darwin branch of the same sh, terminal-notifier (plan) | `tools/notify-action.ps1` (WinRT toast) + `tools/click-handler.js` (snn: URI handler), no vendored binary (EXPERIMENTAL) |
-| desktop entry / app identity | `steam` | `com.valvesoftware.Steam` | the sending bundle's identity | registry-only AUMID under HKCU, icon extracted from the user's steam.exe (EXPERIMENTAL) |
+| helper spawn | `sh <helper> ... >/dev/null 2>&1 &` | same | same call would work; refused until the helper has a macOS branch | `ffi` `CreateProcessW` with `CREATE_NO_WINDOW`, payload in a `<id>.notify` file |
+| helper | `tools/notify-action` (POSIX sh, notify-send) | same, through the portal | Darwin branch of the same sh, terminal-notifier (plan) | `tools/notify-action.ps1` (WinRT toast), no vendored binary |
+| desktop entry / app identity | `steam` | `com.valvesoftware.Steam` | the sending bundle's identity | registry-only AUMID under HKCU, icon extracted from the user's steam.exe |
 | log | `<runtime>/plugin.log`; Millennium's loader lines in `~/.steam/steam/logs/console-linux.txt` | `<runtime>/plugin.log` in the per-app cache | `<runtime>/plugin.log` | `<runtime>\plugin.log` |
 | dev tools | `tools/fire`, `tools/capture`, `tools/mep` | need a `--flatpak` path switch (plan) | need the macOS paths (plan) | `fire.ps1`, `capture.ps1` (plan) |
 
 Files in the runtime directory: `plugin.log` (truncated at each backend
 load; the helper appends its refusals there), the materialized helper
-(`notify-action` on Linux; `notify-action.ps1` plus `click-handler.js` on
-Windows), `steam-dir` (one line: Millennium's `steam_path()` answer,
+(`notify-action` on Linux; `notify-action.ps1` on Windows), `steam-dir` (one line: Millennium's `steam_path()` answer,
 rewritten at each load, removed when there is no answer), `.click` and
 `.dev-fire` (consume-once handoffs), `icons/` (the helper's avatar cache),
 and on Windows `<id>.notify` payload files (helper-consumed), `steam.ico`
@@ -420,7 +420,7 @@ Three to four days with a Mac. Without one, only the first row.
 - Does `-execute` fire for a body click on a banner, or only from
   Notification Center? (The README says "when the notification is clicked".)
 
-## Windows: EXPERIMENTAL delivery shipped, unvalidated
+## Windows: shipped and validated on real hardware, EXPERIMENTAL
 
 Every piece below ships in the plugin, and none of it has run on a real
 Windows machine. The backend says so at load ("windows delivery is
@@ -524,81 +524,72 @@ earlier.
   Assist per app -- the documented answer to in-game suppression. Not sent
   yet; first candidate once validation passes.
 
-### Validation results (Windows 11, real hardware, 2026-09-01)
+### Validation results (Windows 11, real hardware)
 
 Run in a dockur/windows Win11 Pro VM, Millennium 3.5.0-beta.2, Steam client.
 
-1. `pcall(require, "ffi")` -- **PASS.** The load line reads `setup: AUMID
-   branding and snn: scheme registered`, which the PowerShell helper only
-   writes after the backend's `ffi` `CreateProcessW` spawn ran it. The
-   whole spawn design is confirmed on hardware.
+1. `pcall(require, "ffi")` -- **PASS.** The load line `setup: AUMID branding
+   registered` is written by the PowerShell helper, which only runs if the
+   backend's `ffi` `CreateProcessW` spawn worked. No console flashes.
 2. Toast display -- **PASS.** Branded "Steam" with the icon extracted from
-   the user's own steam.exe; a friend avatar (circle-cropped), Aircar
-   library art, and an achievement image from the community CDN all
-   rendered. The dev-fire path (`.dev-fire` -> Steam test method ->
-   captured toast -> `.notify` -> helper -> `Show()`) works end to end.
+   the user's own steam.exe; friend avatars (circle-cropped), Aircar library
+   art, and an achievement image from the community CDN all rendered.
 3. UTF-8 -- **FIXED (c540ce2).** PowerShell 5.1 read the payload as ANSI, so
-   an em dash arrived as mojibake ("Aircar â€”"). The helper now reads it
-   `-Encoding UTF8`.
-4. The click handler and the snn: scheme in isolation -- **PASS.**
-   `wscript click-handler.js "snn:replay/x"` and `Start-Process
-   "snn:replay/x"` both write the stamped `.click`, and the armed bridge
-   consumes it (`click-bridge: replay:x -> replay: invoke ... no stash
-   entry`, correctly refusing a fake name). The transport is sound.
-5. Click from a real toast -- **FAIL, and this is the finding.** A banner
-   click, and a click in the Action Center, produce no `click-bridge` line:
-   Windows fires no activation. The toast is received (it dismisses on
-   click) but the `activationType="protocol"` launch never runs. Tested
-   registry-only three ways: snn scheme alone; plus a `CustomActivator`
-   GUID on the AUMID; plus a stub `CLSID\{guid}` key. None activated, while
-   Windows Defender's own toasts (a registered app with a real activator)
-   activate normally.
+   an em dash arrived as mojibake; the helper now reads it `-Encoding UTF8`.
+4. Click -- **PASS.** A banner click replays Steam's own handler and lands
+   where Steam would (an achievement toast opens that game's achievements).
+5. Focus -- **KNOWN LIMITATION**, below.
 
-**Conclusion:** an unpackaged, binary-free sender cannot get toast-click
-activation on Windows 11. Toast activation of any kind -- protocol
-included -- routes through a registered COM activator: a `LocalServer32`
-executable implementing `INotificationActivationCallback`. A plain
-`wscript`/URI-scheme handler cannot stand in for it (Windows CoCreates the
-server and waits for a class factory, which a script never registers). This
-is the one thing the plan could not settle without hardware; it is settled.
+### How the click works, and why it is not a custom URI scheme
 
-Windows therefore ships **display-only**: notifications appear, branded, with
-artwork, and persist in the Action Center -- the whole out-of-game value.
-Clicking a Windows toast does nothing (documented). The snn: scheme and the
-click handler stay registered, harmless and forward-compatible, so the day a
-small activator binary is added the click path lights up with no other
-change.
+A toast carries `activationType="protocol" launch="steam://snn/replay/<toast>"`.
+Steam receives the URL and dispatches it to the client's JS, where
+`SteamClient.URL.RegisterForRunSteamURL('snn', ...)` (frontend/steamurl.ts)
+parses the token and invokes the stashed handler. Millennium registers its own
+`steam://millennium/...` section through the same API, so this is the
+sanctioned mechanism rather than a trick.
 
-### Remaining Windows work (clicks, deferred)
+The first design registered a private `snn:` URI scheme pointing at a script,
+and **Windows never launched it from a toast** -- measured across every
+combination: HKCU and HKLM registration, with and without `DefaultIcon`,
+`RegisteredApplications` + `Capabilities\URLAssociations`, opaque (`snn:x`)
+and authority (`snn://x`) URI forms, handlers of `wscript`, `cmd` and
+`notepad`, body launch and action button, before and after a reboot. The same
+toast launched `ms-settings:`, `http:` and `steam://` every time, and
+`ShellExecute` ran the custom scheme every time. Conclusion: the toast
+launcher will not resolve a scheme the sending app registers for itself,
+while Steam's own scheme is always available -- and Steam is where this
+plugin already lives, so no custom scheme is needed. The `snn:` registration
+and its JScript handler are deleted; `-Setup` removes any an earlier build
+left behind.
 
-- a compiled COM activator (a ~50-line C++ `LocalServer32` exe, or SnoreToast
-  used purely as the activator) that receives `INotificationActivationCallback`
-  and writes the same `.click` line. This reintroduces a vendored binary,
-  which is the tradeoff the display-only v1 avoids.
-- once clicks work: `scenario="urgent"` to break Focus Assist during
-  fullscreen games, and the `hideSteamToast` interaction re-checked on
-  Windows (the gate itself is validated on Linux).
-- `-Teardown` leaves no keys or icon behind (untested; low risk).
+### The focus limitation
 
-### Open questions
+A click updates the Steam window but does not bring it forward when Steam is
+already open behind other windows. This is a Windows rule, not a plugin gap:
 
-- does `require("ffi")` work inside a Millennium plugin backend on Windows?
-- does a banner click protocol-activate with no stub CLSID registered?
-- does `Get-StartApps` show a Steam AUMID? (Not to borrow -- muting Steam
-  in Windows settings would then mute the plugin whose job is replacing
-  Steam's toasts -- but to know the namespace.)
-- what are the real local-image limits on current Windows 10/11; is the
-  190 KB re-encode threshold right?
-- Constrained Language Mode / WDAC machines kill the script route outright;
-  is that population worth a fallback?
+- Steam's own `steam://open/friends`, activated from a toast with no plugin
+  involved, also fails to raise an already-open window -- and does come
+  forward when Steam is closed to the tray, because presenting a new window
+  is allowed where raising a background one is not.
+- Every lever Steam's own API offers was tried from the main window's own
+  context (`SP Desktop_uid0`, found through `g_PopupManager`):
+  `BringToFront(AndForceOS)`, `MarkLastFocused`, `SetKeyFocus`, `ShowWindow`,
+  and a `HideWindow`+`ShowWindow` re-present. All ran; none took the
+  foreground. `FlashWindow` is absent from this client build.
+- Steam's own toast escapes the rule only because clicking it is input on a
+  Steam-owned window, which makes Steam the foreground process.
 
-### Effort remaining
+`raiseSteamWindow` (frontend/replay.ts) still makes the quiet calls: they cost
+nothing and do work in the tray case, where `steam://open/main` creates the
+window. `RAISE_BY_REPRESENTING` is the flicker experiment, left `false` with
+the measurement recorded next to it.
 
-| item | estimate |
-|---|---|
-| validation pass 1-9 on a Windows machine | 1 d |
-| fixes it surfaces (stub CLSID, image limits, quoting) | 0.5-1 d |
-| `fire.ps1` / `capture.ps1` tester tooling | 0.5 d |
+### Remaining Windows work
 
-The implementation is shipped; a day or two with hardware stands between
-this section and dropping the EXPERIMENTAL mark.
+- `fire.ps1` / `capture.ps1` tester tooling (the dev loop writes `.dev-fire`
+  by hand today).
+- `scenario="urgent"` to break through Focus Assist, which suppresses toasts
+  during fullscreen games by default.
+- `-Teardown` leaving no keys or icon behind (untested; low risk).
+- Wider testing: one machine, one Windows build, one Steam client.

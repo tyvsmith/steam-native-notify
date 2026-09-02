@@ -44,6 +44,36 @@ for (const name of ['choose', 'fiber', 'notification', 'replay']) {
 		`frontend/${name}.ts imports 'millennium'; the offline-test boundary forbids that`);
 }
 
+// --- steam:// click URL ----------------------------------------------------
+
+// The Windows click transport: Steam dispatches steam://snn/replay/<toast> to
+// the client's JS (frontend/steamurl.ts). The parser is the trust boundary --
+// Steam passes the URL through verbatim, so only the one shape this plugin
+// emits may reach the replay stash. Parsed here by the same regex the module
+// uses; keep them in step.
+const REPLAY_URL = /^steam:\/{1,2}snn\/replay\/([A-Za-z0-9_.-]+)\/?$/;
+const replayName = (url) => {
+	const m = REPLAY_URL.exec(String(url).trim());
+	return m ? m[1] : null;
+};
+check('steam-url: a replay URL yields the toast name',
+	replayName('steam://snn/replay/notificationtoasts_10001_desktop') === 'notificationtoasts_10001_desktop');
+check('steam-url: a single-slash URL is accepted (Steam normalizes both)',
+	replayName('steam:/snn/replay/notificationtoasts_2_desktop') === 'notificationtoasts_2_desktop');
+check('steam-url: a trailing slash is tolerated',
+	replayName('steam://snn/replay/toast_1/') === 'toast_1');
+for (const bad of [
+	'steam://snn/replay/',
+	'steam://snn/other/toast_1',
+	'steam://millennium/settings',
+	'steam://snn/replay/../../etc/passwd',
+	'steam://snn/replay/toast 1',
+	'snn:replay/toast_1',
+	'',
+]) {
+	check(`steam-url: refuses ${JSON.stringify(bad)}`, replayName(bad) === null);
+}
+
 // --- notificationFromToast -------------------------------------------------
 
 // The real input is a popup window whose React tree carries Steam's decoded

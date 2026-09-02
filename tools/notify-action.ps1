@@ -7,12 +7,12 @@
 #
 # Spawned by backend/main.lua (CreateProcessW, CREATE_NO_WINDOW), one process
 # per notification, exiting right after Show(): clicks are not waited for.
-# The toast carries activationType="protocol", and Windows itself launches
-# the registered snn: handler (tools/click-handler.js) on a click -- no
-# resident process, no COM activator, no vendored binary.
+# The toast carries activationType="protocol" launching steam://snn/replay/...,
+# which Steam hands to the client's JS, where frontend/steamurl.ts invokes the
+# stashed handler -- no resident process, no COM activator, no vendored binary.
 #
-# Usage: notify-action.ps1 -Setup            register AUMID branding + snn: scheme (idempotent)
-#        notify-action.ps1 -Teardown         remove both registrations and the icon
+# Usage: notify-action.ps1 -Setup            register AUMID branding (idempotent)
+#        notify-action.ps1 -Teardown         remove the registration and the icon
 #        notify-action.ps1 -Id <id>          deliver <id>.notify from the runtime directory
 #
 # The .notify file carries the same five slots the POSIX helper takes as
@@ -79,15 +79,11 @@ if ($Setup) {
     } catch {
         Write-PluginLog "setup: icon extraction failed, DisplayName-only branding: $($_.Exception.Message)"
     }
-    # The click path: snn: is a per-user URI scheme whose handler writes the
-    # click file. wscript //B runs the JScript with no window and no dialogs.
-    $handler = Join-Path $RuntimeDir 'click-handler.js'
-    $command = "`"$env:SystemRoot\System32\wscript.exe`" //B //Nologo `"$handler`" `"%1`""
-    New-Item -Path "$SchemeKey\shell\open\command" -Force | Out-Null
-    Set-ItemProperty -Path $SchemeKey -Name '(Default)' -Value 'URL:Steam Native Notify'
-    Set-ItemProperty -Path $SchemeKey -Name 'URL Protocol' -Value ''
-    Set-ItemProperty -Path "$SchemeKey\shell\open\command" -Name '(Default)' -Value $command
-    Write-PluginLog 'setup: AUMID branding and snn: scheme registered'
+    # No URI scheme of our own: clicks ride steam://snn/... (see the launch
+    # attribute below). An earlier build registered an "snn:" scheme here;
+    # remove it so an upgrade leaves nothing behind.
+    if (Test-Path -Path $SchemeKey) { Remove-Item -Path $SchemeKey -Recurse -Force }
+    Write-PluginLog 'setup: AUMID branding registered'
     exit 0
 }
 
@@ -203,12 +199,17 @@ $Icon = Limit-IconSize (Resolve-Icon ([string]$Payload.image))
 
 function Esc([string]$Text) { [System.Security.SecurityElement]::Escape($Text) }
 
-# activationType="protocol": Windows ShellExecutes the launch URI on a click,
-# banner or (with persistence) Action Center, with no process of ours alive.
-# No route means the toast is deliberately inert, mirroring Steam's own.
+# activationType="protocol": Windows launches the URI on a click, banner or
+# Action Center, with no process of ours alive. The scheme is Steam's own --
+# measured on Windows 11 (docs/platforms.md), a toast will launch schemes
+# Windows already knows (ms-settings:, http:, steam:) and silently refuses
+# one this plugin registers itself, however it is registered. Steam hands
+# steam://snn/... to the client's JS, where frontend/steamurl.ts invokes the
+# stashed handler. No route means the toast is deliberately inert, mirroring
+# Steam's own.
 $ToastAttrs = ''
 if ($Route -match '^replay:([A-Za-z0-9_.\-]+)$') {
-    $ToastAttrs = " activationType=`"protocol`" launch=`"snn:replay/$($Matches[1])`""
+    $ToastAttrs = " activationType=`"protocol`" launch=`"steam://snn/replay/$($Matches[1])`""
 }
 $ImageXml = ''
 if ($Icon) {

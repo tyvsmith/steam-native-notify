@@ -75,13 +75,11 @@ local function runtime_dir()
     return join(os.getenv("XDG_CACHE_HOME") or join(home, ".cache"), "steam-native-notify")
 end
 local RUNTIME_DIR = runtime_dir()
--- Windows delivers through a PowerShell helper and a JScript click handler
--- (docs/platforms.md); POSIX through the sh helper. Each platform
--- materializes only what it runs.
+-- Windows delivers through a PowerShell helper (clicks come back through
+-- Steam's own steam:// dispatch, frontend/steamurl.ts); POSIX through the sh
+-- helper. Each platform materializes only what it runs.
 local HELPER = join(RUNTIME_DIR, IS_WINDOWS and "notify-action.ps1" or "notify-action")
 local HELPER_ASSET = IS_WINDOWS and "tools/notify-action.ps1" or "tools/notify-action"
-local CLICK_HANDLER = join(RUNTIME_DIR, "click-handler.js")
-local CLICK_HANDLER_ASSET = "tools/click-handler.js"
 local LOG_FILE = join(RUNTIME_DIR, "plugin.log")
 
 --- Millennium keeps a packed plugin's logger output in an in-memory buffer
@@ -518,14 +516,9 @@ local function on_load()
         if IS_WINDOWS and helper then
             log_line("info", "windows delivery is EXPERIMENTAL and unvalidated"
                 .. " -- docs/platforms.md lists the checks")
-            local handler, handler_err = materialize_asset(CLICK_HANDLER_ASSET, CLICK_HANDLER)
-            if not handler then
-                log_line("error", "click handler install FAILED: " .. tostring(handler_err)
-                    .. " -- toast clicks will do nothing")
-            end
             if not spawn_windows_helper("-Setup") then
                 log_line("error", "helper -Setup could not run"
-                    .. " -- toasts may be unbranded and clicks unregistered")
+                    .. " -- toasts may be unbranded")
             end
         end
     end

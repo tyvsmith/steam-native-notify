@@ -4,6 +4,7 @@ import { dlog, safeJson } from './log';
 import { armClickBridge } from './clickbridge';
 import { startDevFirePoll } from './devfire';
 import { stashToastHandler } from './replay';
+import { registerSteamUrlClicks } from './steamurl';
 import { SettingsPanel } from './Settings';
 import { loadSettings, settings } from './settings';
 
@@ -274,12 +275,21 @@ export default definePlugin(() => {
 	void loadSettings();
 	installHook();
 	startDevFirePoll();
+	// The Windows click path: a toast carries steam://snn/replay/<toast>
+	// and Steam dispatches it here. Additive on every platform; Linux
+	// clicks still ride the click file (steamurl.ts).
+	const steamUrl = registerSteamUrlClicks();
 
 	return {
 		title: 'Steam Native Notify',
 		icon: pluginIcon(),
 		content: <SettingsPanel />,
 		onDismount() {
+			try {
+				steamUrl?.unregister();
+			} catch {
+				/* Steam tore the dispatch down first; nothing to release. */
+			}
 			for (const r of registrations.splice(0)) {
 				try {
 					r.Unregister();

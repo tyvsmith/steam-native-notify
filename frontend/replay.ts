@@ -217,6 +217,136 @@ export function inspectReplayStash(): void {
  * A throw from the handler is logged verbatim and swallowed. Returns
  * whether a live handler was found and ran without throwing.
  */
+/**
+ * Raise Steam's desktop window, the way clicking Steam's own toast does.
+ *
+ * A replayed handler navigates the client but leaves the window where it
+ * was, so a click with another app focused changed a page nobody could see.
+ * SteamClient.Window.BringToFront is the client's own answer, but its
+ * documentation is explicit that it must be called from the window being
+ * raised -- never from SharedJSContext, where a plugin runs. g_PopupManager
+ * is already this plugin's door to Steam's windows (index.tsx), so the call
+ * is made through the main window's own SteamClient, with AndForceOS so the
+ * OS actually brings it forward rather than flashing the taskbar.
+ *
+ * steam://open/main stays as the fallback: it navigates rather than raises
+ * (measured on Windows 11 and Linux), but it is what creates the desktop
+ * window when Steam is closed to the tray and there is no popup to raise.
+ *
+ * Best-effort throughout: a click must still replay if none of this works,
+ * and on Wayland the compositor may refuse the focus change regardless.
+ */
+const BRING_TO_FRONT_FORCE_OS = 1; // EWindowBringToFront.AndForceOS
+const TOAST_POPUP_PREFIX = 'notificationtoasts_';
+/** Steam's own names for the desktop window, most specific first. */
+const MAIN_WINDOW_NAMES = ['SP', 'Steam', 'SteamDesktop'];
+/**
+ * Whether a click may hide and re-show Steam's window to win the foreground.
+ * Measured on Windows 11 (2026-09-01): it does NOT win it -- BringToFront,
+ * MarkLastFocused, SetKeyFocus, ShowWindow and Hide+Show all ran and the
+ * window stayed behind. Off, so nothing flickers for a raise Windows will
+ * refuse anyway; kept as the record of what was tried (docs/platforms.md).
+ */
+const RAISE_BY_REPRESENTING = false;
+
+/**
+ * Every window Steam's popup manager knows. GetPopups() answered empty on a
+ * live client with the desktop window open (measured 2026-09-01), while
+ * m_mapPopups held them, so both are read and merged rather than trusting
+ * either: this is undocumented client internals, and the shape has already
+ * moved once.
+ */
+function steamPopups(): any[] {
+	const mgr: any = Reflect.get(globalThis, 'g_PopupManager');
+	if (!mgr) return [];
+	const out: any[] = [];
+	const absorb = (source: any) => {
+		if (!source) return;
+		if (Array.isArray(source)) out.push(...source);
+		else if (typeof source.values === 'function') out.push(...Array.from(source.values() as Iterable<any>));
+		else if (typeof source === 'object') out.push(...Object.values(source));
+	};
+	try {
+		if (typeof mgr.GetPopups === 'function') absorb(mgr.GetPopups());
+	} catch {
+		/* an internal that moved; m_mapPopups below still answers */
+	}
+	absorb(mgr.m_mapPopups);
+	// A popup may appear in both accessors, and Steam nests its own wrapper.
+	const seen = new Set<any>();
+	return out.filter((p) => p && !seen.has(p) && seen.add(p));
+}
+
+export function raiseSteamWindow(): void {
+	try {
+		const candidates = steamPopups().filter((p) => {
+			const name = String(p?.window?.name ?? p?.m_strName ?? '');
+			return name.indexOf(TOAST_POPUP_PREFIX) !== 0 && p?.window?.SteamClient?.Window;
+		});
+		const named = (n: string) =>
+			candidates.find((p) => String(p?.window?.name ?? p?.m_strName ?? '').toLowerCase().indexOf(n) === 0);
+		const target = MAIN_WINDOW_NAMES.map(named).find(Boolean) ?? candidates[0];
+		if (target) {
+			const name = String(target?.window?.name ?? target?.m_strName ?? '?');
+			const api: any = target.window.SteamClient.Window;
+			// Steam's own window calls, weakest side effect first. Windows
+			// refuses a plain raise for a background process on an external
+			// trigger (measured: BringToFront alone, and steam:// activation,
+			// both leave the window behind), so the focus calls follow, and
+			// FlashWindow is the sanctioned way to ask for attention when the
+			// OS will not hand over the foreground. Each is optional in the
+			// client build; the log names the ones that ran.
+			const ran: string[] = [];
+			const call = (fn: string, ...args: unknown[]) => {
+				try {
+					if (typeof api?.[fn] === 'function') {
+						api[fn](...args);
+						ran.push(fn);
+					}
+				} catch {
+					/* one missing call must not stop the rest */
+				}
+			};
+			call('BringToFront', BRING_TO_FRONT_FORCE_OS);
+			call('MarkLastFocused');
+			call('SetKeyFocus', true);
+			call('FlashWindow');
+			call('ShowWindow');
+			// Last resort, and the only path with evidence behind it: showing
+			// a window Steam had hidden DOES take focus (a click from the tray
+			// comes forward), because Windows treats presenting a window
+			// differently from raising a background one. It flickers, so it
+			// runs only after the quiet calls above have failed to move
+			// anything. ShowWindow is in a finally: a Hide that succeeded with
+			// a Show that threw would leave the user with no Steam window.
+			if (RAISE_BY_REPRESENTING && typeof api?.HideWindow === 'function' && typeof api?.ShowWindow === 'function') {
+				try {
+					api.HideWindow();
+				} finally {
+					api.ShowWindow();
+					ran.push('Hide+Show');
+				}
+			}
+			try {
+				target.window.focus();
+			} catch {
+				/* focus() is a nudge; the calls above are the real ones. */
+			}
+			dlog(`raise: ${name} -> ${ran.join(',') || 'nothing available'}`);
+			return;
+		}
+		// No window to raise: Steam is closed to the tray, where opening the
+		// desktop window DOES take focus. steam://open/main is what creates it.
+		const sc = Reflect.get(globalThis, 'SteamClient') as
+			| { URL?: { ExecuteSteamURL?: (url: string) => void } }
+			| undefined;
+		sc?.URL?.ExecuteSteamURL?.('steam://open/main');
+		dlog('raise: no window; steam://open/main');
+	} catch (e) {
+		dlog(`raise failed: ${(e as Error)?.message ?? e}`);
+	}
+}
+
 export function invokeReplayHandler(name?: string): boolean {
 	let entry: StashEntry | undefined;
 	if (name) {

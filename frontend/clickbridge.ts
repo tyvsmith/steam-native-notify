@@ -1,6 +1,6 @@
 import { ffi } from 'millennium';
 import { dlog } from './log';
-import { CLICK_WINDOW_MS, invokeReplayHandler, REPLAY_CLICK_PREFIX } from './replay';
+import { CLICK_WINDOW_MS, invokeReplayHandler, raiseSteamWindow, REPLAY_CLICK_PREFIX } from './replay';
 
 /**
  * The click transport: tools/notify-action writes each clicked payload
@@ -60,6 +60,9 @@ export function armClickBridge(): void {
 				dlog(`click-bridge: unbridgeable route ${route}`);
 				return;
 			}
+			// Only for a click that will actually replay: a refused payload
+			// must not pull Steam forward for nothing.
+			raiseSteamWindow();
 			if (!invokeReplayHandler(route.slice(REPLAY_CLICK_PREFIX.length))) {
 				dlog('click-bridge: replay did not run');
 			}

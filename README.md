@@ -76,13 +76,16 @@ the vocabulary table is in `docs/architecture.md`.
   not supported by Millennium itself; the plugin's paths already know the
   Flatpak layout, but nothing has run there. On macOS the backend loads,
   logs that delivery is not implemented, and delivers nothing.
-- **Windows support is EXPERIMENTAL and display-only.** Notifications work,
-  validated on real Windows 11: WinRT toasts through a PowerShell helper,
-  branded "Steam" with the artwork, persisting in the Action Center; no
-  vendored binaries, every registration per-user and reversible. **Clicking a
-  Windows toast does nothing** — an unpackaged, binary-free sender cannot get
-  toast-click activation on Windows (it needs a compiled COM activator);
-  `docs/platforms.md` records the validation and the deferred click work. The
+- **Windows support is EXPERIMENTAL**, validated on real Windows 11 but not
+  in wide use. Notifications work — WinRT toasts through a PowerShell helper,
+  branded "Steam" with the artwork, persisting in the Action Center — and so
+  do clicks: a click replays Steam's own handler and lands where Steam would.
+  No vendored binaries; every registration is per-user and reversible. One
+  documented limitation: if the Steam window is already open behind other
+  windows it updates *behind* them. Windows refuses to let a background
+  process take the foreground on an external activation, and Steam's own
+  `steam://` activation behaves identically, so this is an OS rule rather
+  than a plugin gap. From the tray, Steam comes forward normally. The
   in-game half is further limited by Focus Assist, which suppresses toasts
   during fullscreen games by default.
 - The 64-bit SteamRT3 client does not work: Millennium installs and reports
@@ -91,8 +94,9 @@ the vocabulary table is in `docs/architecture.md`.
 - On Linux a notification is clickable only while its popup is up; the copy
   in the notification centre is inert. quickshell 1.2 expires the popup
   after about 8 seconds despite the no-timeout hint, which bounds the click
-  window. (On Windows, protocol activation is designed to make Action
-  Center clicks work too — unverified, like all Windows behaviour here.)
+  window. On Windows the toast persists in the Action Center and a click
+  there activates too, because Steam receives the click rather than a
+  short-lived helper.
 - The stashed click is frozen to the surface the toast rendered on: a
   notification captured while a game was focused, clicked after that game
   exits, does nothing. Clicks also expire 120 seconds after delivery and do
